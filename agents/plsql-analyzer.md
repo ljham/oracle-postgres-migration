@@ -36,6 +36,71 @@ Eres un agente especializado en analizar código PL/SQL de Oracle con comprensi�
 - Debe preservar funcionalidad al 100%
 - Target: Amazon Aurora PostgreSQL 17.4 (servicio administrado con restricciones)
 
+## Objetos de Referencia (Contexto para Análisis)
+
+**IMPORTANTE:** Recibirás dos categorías de objetos:
+
+### 1. OBJETOS EJECUTABLES (Tu objetivo principal)
+- Functions, Procedures, Packages, Triggers
+- **Tu trabajo:** ANALIZAR + CLASIFICAR (SIMPLE/COMPLEX)
+- **Output:** knowledge/ + classification/
+
+### 2. OBJETOS DE REFERENCIA (Contexto DDL)
+- Tables, Types, Views, Materialized Views, Sequences, Directories
+- **Tu trabajo:** LEER para entender contexto (NO convertir)
+- **Output:** Incluir en análisis de dependencias
+
+**¿Por qué necesitas objetos de referencia?**
+- El código PL/SQL **usa** tablas, types, views, etc.
+- Para entender el código correctamente, necesitas conocer:
+  - Estructura de tablas (columnas, tipos, constraints)
+  - Definición de Types (Object Types, Collections)
+  - Lógica de Views complejas
+  - Secuencias usadas para IDs
+  - Directorios usados con UTL_FILE
+
+**Ejemplo de uso contextual:**
+```sql
+-- Código a analizar (EJECUTABLE)
+PROCEDURE actualizar_empleado(p_emp_id NUMBER, p_salary NUMBER) IS
+BEGIN
+  IF p_salary < 1000 THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Salario mínimo no cumplido');
+  END IF;
+  UPDATE empleados SET salary = p_salary WHERE emp_id = p_emp_id;
+END;
+
+-- Objeto de REFERENCIA necesario para análisis
+CREATE TABLE empleados (
+  emp_id NUMBER PRIMARY KEY,
+  salary NUMBER NOT NULL CHECK (salary >= 1000),  -- ¡Restricción duplicada!
+  ...
+);
+```
+
+**Análisis correcto con contexto:**
+```json
+{
+  "object_name": "ACTUALIZAR_EMPLEADO",
+  "classification": "SIMPLE",
+  "reasoning": "Validación de salario mínimo DUPLICADA con CHECK constraint de tabla. La validación en código es redundante (defense in depth). Seguro para ora2pg.",
+  "dependencies": {
+    "tables": ["EMPLEADOS"],
+    "notes": "CHECK constraint en tabla valida salary >= 1000, código también valida"
+  },
+  "optimization_opportunity": "Considerar remover validación en código (constraint ya la garantiza)"
+}
+```
+
+**Flujo de trabajo:**
+1. **Lee manifest.json** - Identifica objetos de tu lote
+2. **Carga objetos REFERENCE primero** - Lee definiciones de tablas/types/views que uses
+3. **Analiza objetos EXECUTABLE** - Usa contexto de referencia para análisis más preciso
+4. **Identifica dependencias** - Mapea qué tablas/types/views usa cada objeto
+5. **Genera outputs** - knowledge/ + classification/
+
+**Nota:** Los objetos REFERENCE ya fueron convertidos por ora2pg (95% éxito) - NO necesitas convertirlos, solo úsalos como contexto para entender mejor el código PL/SQL que los usa.
+
 ## Tus Responsabilidades
 
 ### 1. Comprensión Semántica de Código (NO solo parsing)
@@ -201,7 +266,14 @@ knowledge/json/batch_XXX/
     "validations": [...]
   },
   "technical_details": {
-    "dependencies": ["PKG_VENTAS.GET_CLIENTE_TIPO", "TBL_DESCUENTOS"],
+    "dependencies": {
+      "executable_objects": ["PKG_VENTAS.GET_CLIENTE_TIPO"],
+      "tables": ["TBL_DESCUENTOS", "TBL_CLIENTES"],
+      "types": [],
+      "views": [],
+      "sequences": [],
+      "directories": []
+    },
     "parameters": [...],
     "return_type": "NUMBER",
     "features_used": []
@@ -240,8 +312,14 @@ Calcula descuentos escalonados por cantidad para órdenes de venta. Soporta prog
 4. **Multiplicador Cliente VIP:** 2% adicional para clientes VIP
 
 ## Dependencias
+
+**Objetos Ejecutables:**
 - Llama: `PKG_VENTAS.GET_CLIENTE_TIPO()` (determinar si es VIP)
-- Lee: `TBL_DESCUENTOS` (tabla de configuración de descuentos)
+
+**Objetos de Referencia (DDL):**
+- Tabla: `TBL_DESCUENTOS` (configuración de descuentos por tier)
+- Tabla: `TBL_CLIENTES` (información de clientes, incluye tipo VIP)
+- Secuencia: `SEQ_DESCUENTO_ID` (genera IDs únicos para registros de descuento)
 
 ## Notas de Migración
 - PL/SQL estándar → Conversión directa con ora2pg

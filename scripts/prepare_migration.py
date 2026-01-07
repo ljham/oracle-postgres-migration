@@ -61,7 +61,8 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
     # Patrones de detección según tipo de objeto
     if object_type in ["FUNCTION", "PROCEDURE"]:
         # Patrón: CREATE OR REPLACE FUNCTION/PROCEDURE nombre ...
-        pattern = r'CREATE\s+OR\s+REPLACE\s+' + object_type + r'\s+(\w+\.?\w*)'
+        # Soporta: nombre, "esquema"."nombre", esquema.nombre
+        pattern = r'CREATE\s+OR\s+REPLACE\s+' + object_type + r'\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
@@ -82,7 +83,11 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
             else:
                 actual_end = end_pos
 
-            object_name = match.group(1).upper()
+            # Extraer nombre (puede estar en grupo 2 o 3 dependiendo del patrón)
+            if match.group(2):  # Tiene esquema: "esquema"."nombre"
+                object_name = f"{match.group(1)}.{match.group(2)}".upper()
+            else:  # Sin esquema: nombre
+                object_name = match.group(3).upper()
             object_code = content[start_pos:actual_end].strip()
 
             # Calcular líneas
@@ -104,7 +109,8 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
 
     elif object_type == "PACKAGE_SPEC":
         # Patrón: CREATE OR REPLACE PACKAGE nombre IS/AS
-        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+(\w+\.?\w*)\s+(IS|AS)'
+        # Soporta: nombre, "esquema"."nombre", esquema.nombre
+        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))\s+(IS|AS)'
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
@@ -123,7 +129,11 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
             else:
                 actual_end = end_pos
 
-            object_name = match.group(1).upper()
+            # Extraer nombre (puede estar en grupo 2 o 3 dependiendo del patrón)
+            if match.group(2):  # Tiene esquema: "esquema"."nombre"
+                object_name = f"{match.group(1)}.{match.group(2)}".upper()
+            else:  # Sin esquema: nombre
+                object_name = match.group(3).upper()
             object_code = content[start_pos:actual_end].strip()
 
             lines_before = content[:start_pos].count('\n') + 1
@@ -144,7 +154,8 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
 
     elif object_type == "PACKAGE_BODY":
         # Patrón: CREATE OR REPLACE PACKAGE BODY nombre IS/AS
-        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+BODY\s+(\w+\.?\w*)\s+(IS|AS)'
+        # Soporta: nombre, "esquema"."nombre", esquema.nombre
+        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+BODY\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))\s+(IS|AS)'
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
@@ -164,7 +175,11 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
             else:
                 actual_end = end_pos
 
-            object_name = match.group(1).upper()
+            # Extraer nombre (puede estar en grupo 2 o 3 dependiendo del patrón)
+            if match.group(2):  # Tiene esquema: "esquema"."nombre"
+                object_name = f"{match.group(1)}.{match.group(2)}".upper()
+            else:  # Sin esquema: nombre
+                object_name = match.group(3).upper()
             object_code = content[start_pos:actual_end].strip()
 
             lines_before = content[:start_pos].count('\n') + 1
@@ -185,7 +200,8 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
 
     elif object_type == "TRIGGER":
         # Patrón: CREATE OR REPLACE TRIGGER nombre
-        pattern = r'CREATE\s+OR\s+REPLACE\s+TRIGGER\s+(\w+\.?\w*)'
+        # Soporta: nombre, "esquema"."nombre", esquema.nombre
+        pattern = r'CREATE\s+OR\s+REPLACE\s+TRIGGER\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
@@ -204,7 +220,11 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
             else:
                 actual_end = end_pos
 
-            object_name = match.group(1).upper()
+            # Extraer nombre (puede estar en grupo 2 o 3 dependiendo del patrón)
+            if match.group(2):  # Tiene esquema: "esquema"."nombre"
+                object_name = f"{match.group(1)}.{match.group(2)}".upper()
+            else:  # Sin esquema: nombre
+                object_name = match.group(3).upper()
             object_code = content[start_pos:actual_end].strip()
 
             lines_before = content[:start_pos].count('\n') + 1
@@ -227,18 +247,123 @@ def parse_sql_file(file_path: Path, object_type: str) -> List[Dict]:
     return objects
 
 
+def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
+    """
+    Parsea objetos de referencia (DDL, Types, Views) para análisis contextual.
+
+    Estos objetos NO se convierten (ora2pg ya los maneja), pero el agente
+    los necesita como contexto para analizar código PL/SQL que los usa.
+
+    Args:
+        file_path: Ruta al archivo SQL
+        object_type: Tipo de objeto (TABLE, TYPE, VIEW, SEQUENCE, etc.)
+
+    Returns:
+        Lista de diccionarios con metadata de cada objeto
+    """
+    if not file_path.exists():
+        return []
+
+    print(f"📖 Parseando objetos de referencia: {file_path.name}...")
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    objects = []
+
+    # Patrones según tipo de objeto (soportan "esquema"."nombre", esquema.nombre, nombre)
+    if object_type == "TABLE":
+        pattern = r'CREATE\s+TABLE\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
+    elif object_type == "TYPE":
+        pattern = r'CREATE\s+(OR\s+REPLACE\s+)?TYPE\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
+    elif object_type == "VIEW":
+        pattern = r'CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
+    elif object_type == "MVIEW":
+        pattern = r'CREATE\s+MATERIALIZED\s+VIEW\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
+    elif object_type == "SEQUENCE":
+        pattern = r'CREATE\s+SEQUENCE\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
+    elif object_type == "DIRECTORY":
+        pattern = r'CREATE\s+(OR\s+REPLACE\s+)?DIRECTORY\s+(?:"?(\w+)"?\."?(\w+)"?|(\w+))'
+    else:
+        return []
+
+    matches = list(re.finditer(pattern, content, re.IGNORECASE))
+
+    for i, match in enumerate(matches):
+        start_pos = match.start()
+
+        # Buscar fin del objeto (punto y coma)
+        if i < len(matches) - 1:
+            end_pos = matches[i + 1].start()
+        else:
+            end_pos = len(content)
+
+        # Encontrar el próximo ; después del CREATE
+        semicolon_search = content[start_pos:end_pos]
+        semicolon_match = re.search(r';', semicolon_search)
+
+        if semicolon_match:
+            actual_end = start_pos + semicolon_match.end()
+        else:
+            actual_end = end_pos
+
+        # Extraer nombre del objeto
+        # Los grupos capturados dependen de si el objeto tiene OR REPLACE
+        # Para TYPE, VIEW, DIRECTORY: grupos son (OR REPLACE?, schema?, nombre?, nombre_sin_esquema?)
+        # Para TABLE, MVIEW, SEQUENCE: grupos son (schema?, nombre?, nombre_sin_esquema?)
+        groups = match.groups()
+
+        # Filtrar grupos None y buscar los últimos 3 grupos (schema, nombre, nombre_sin_esquema)
+        relevant_groups = [g for g in groups if g is not None and g.upper() not in ['OR', 'REPLACE']][-3:]
+
+        if len(relevant_groups) >= 2 and relevant_groups[1]:  # Tiene esquema: "esquema"."nombre"
+            object_name = f"{relevant_groups[0]}.{relevant_groups[1]}".upper()
+        elif len(relevant_groups) >= 1:  # Sin esquema: nombre
+            object_name = relevant_groups[-1].upper()
+        else:
+            object_name = "UNKNOWN"
+
+        object_code = content[start_pos:actual_end].strip()
+
+        lines_before = content[:start_pos].count('\n') + 1
+        lines_in_object = object_code.count('\n') + 1
+
+        objects.append({
+            "object_id": f"{object_type.lower()}_{i+1:04d}",
+            "object_name": object_name,
+            "object_type": object_type,
+            "category": "REFERENCE",  # NO se convierte, solo se analiza
+            "source_file": file_path.name,
+            "line_start": lines_before,
+            "line_end": lines_before + lines_in_object - 1,
+            "char_start": start_pos,
+            "char_end": actual_end,
+            "code_length": len(object_code),
+            "status": "reference_only",
+            "note": "Convertido por ora2pg - Incluido como contexto de análisis"
+        })
+
+    print(f"  ✅ Encontrados {len(objects)} objetos de tipo {object_type} (referencia)")
+    return objects
+
+
 def generate_manifest() -> Dict:
     """
     Genera manifest.json con índice completo de todos los objetos.
+
+    Incluye:
+    - EXECUTABLE objects: Código PL/SQL que se convierte (functions, procedures, etc.)
+    - REFERENCE objects: DDL y objetos estructurales para contexto (tables, types, views)
 
     Returns:
         Diccionario con manifest completo
     """
     print("\n🔍 Generando manifest de objetos...\n")
 
-    all_objects = []
+    # ===== OBJETOS EJECUTABLES (PL/SQL a convertir) =====
+    print("📝 Procesando objetos EJECUTABLES (código PL/SQL)...\n")
+    executable_objects = []
 
-    # Archivos a procesar
     files_to_parse = [
         (EXTRACTED_DIR / "functions.sql", "FUNCTION"),
         (EXTRACTED_DIR / "procedures.sql", "PROCEDURE"),
@@ -250,25 +375,58 @@ def generate_manifest() -> Dict:
     for file_path, object_type in files_to_parse:
         if file_path.exists():
             objects = parse_sql_file(file_path, object_type)
-            all_objects.extend(objects)
+            # Marcar como ejecutables
+            for obj in objects:
+                obj["category"] = "EXECUTABLE"
+            executable_objects.extend(objects)
         else:
             print(f"⚠️  Archivo no encontrado: {file_path}")
+
+    # ===== OBJETOS DE REFERENCIA (DDL para contexto) =====
+    print("\n📚 Procesando objetos de REFERENCIA (contexto)...\n")
+    reference_objects = []
+
+    reference_files = [
+        (EXTRACTED_DIR / "tables.sql", "TABLE"),
+        (EXTRACTED_DIR / "types.sql", "TYPE"),
+        (EXTRACTED_DIR / "views.sql", "VIEW"),
+        (EXTRACTED_DIR / "mviews.sql", "MVIEW"),
+        (EXTRACTED_DIR / "sequences.sql", "SEQUENCE"),
+        (EXTRACTED_DIR / "directories.sql", "DIRECTORY"),
+    ]
+
+    for file_path, object_type in reference_files:
+        objects = parse_reference_objects(file_path, object_type)
+        reference_objects.extend(objects)
+
+    # ===== COMBINAR TODOS LOS OBJETOS =====
+    all_objects = reference_objects + executable_objects
 
     # Renumerar object_id secuencialmente
     for i, obj in enumerate(all_objects, start=1):
         obj["object_id"] = f"obj_{i:04d}"
 
+    # Generar estadísticas
+    executable_count = len(executable_objects)
+    reference_count = len(reference_objects)
+
+    objects_by_type = {}
+    for obj in all_objects:
+        obj_type = obj["object_type"]
+        objects_by_type[obj_type] = objects_by_type.get(obj_type, 0) + 1
+
     # Generar manifest
     manifest = {
         "generated_at": datetime.now().isoformat(),
         "total_objects": len(all_objects),
-        "objects_by_type": {
-            "FUNCTION": sum(1 for o in all_objects if o["object_type"] == "FUNCTION"),
-            "PROCEDURE": sum(1 for o in all_objects if o["object_type"] == "PROCEDURE"),
-            "PACKAGE_SPEC": sum(1 for o in all_objects if o["object_type"] == "PACKAGE_SPEC"),
-            "PACKAGE_BODY": sum(1 for o in all_objects if o["object_type"] == "PACKAGE_BODY"),
-            "TRIGGER": sum(1 for o in all_objects if o["object_type"] == "TRIGGER"),
+        "executable_count": executable_count,
+        "reference_count": reference_count,
+        "objects_by_category": {
+            "EXECUTABLE": executable_count,
+            "REFERENCE": reference_count
         },
+        "objects_by_type": objects_by_type,
+        "note": "REFERENCE objects son convertidos por ora2pg - Se incluyen solo como contexto para análisis",
         "objects": all_objects
     }
 
@@ -277,19 +435,30 @@ def generate_manifest() -> Dict:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     print(f"\n✅ Manifest generado: {MANIFEST_FILE}")
+    print(f"\n📊 RESUMEN:")
     print(f"   Total objetos: {manifest['total_objects']}")
-    for obj_type, count in manifest['objects_by_type'].items():
-        print(f"   - {obj_type}: {count}")
+    print(f"\n   EJECUTABLES (a convertir): {executable_count}")
+    for obj_type in ["FUNCTION", "PROCEDURE", "PACKAGE_SPEC", "PACKAGE_BODY", "TRIGGER"]:
+        count = objects_by_type.get(obj_type, 0)
+        if count > 0:
+            print(f"     - {obj_type}: {count}")
+
+    print(f"\n   REFERENCIA (contexto): {reference_count}")
+    for obj_type in ["TABLE", "TYPE", "VIEW", "MVIEW", "SEQUENCE", "DIRECTORY"]:
+        count = objects_by_type.get(obj_type, 0)
+        if count > 0:
+            print(f"     - {obj_type}: {count}")
 
     return manifest
 
 
-def initialize_progress(manifest: Dict) -> Dict:
+def initialize_progress(manifest: Dict, force: bool = False) -> Dict:
     """
     Inicializa archivo progress.json para tracking.
 
     Args:
         manifest: Manifest generado
+        force: Si es True, sobrescribe progress.json sin preguntar
 
     Returns:
         Diccionario con estado inicial de progreso
@@ -297,7 +466,7 @@ def initialize_progress(manifest: Dict) -> Dict:
     print("\n📊 Inicializando tracking de progreso...\n")
 
     # Verificar si ya existe progress.json
-    if PROGRESS_FILE.exists():
+    if PROGRESS_FILE.exists() and not force:
         print(f"⚠️  Ya existe {PROGRESS_FILE}")
         with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
             existing_progress = json.load(f)
@@ -306,11 +475,8 @@ def initialize_progress(manifest: Dict) -> Dict:
         print(f"   - Procesados: {existing_progress['processed_count']}/{existing_progress['total_objects']}")
         print(f"   - Último batch: {existing_progress['current_batch']}")
         print(f"   - Último objeto: {existing_progress['last_object_processed']}")
-
-        response = input("\n¿Resetear progreso? (s/n): ")
-        if response.lower() != 's':
-            print("   Manteniendo progreso existente")
-            return existing_progress
+        print("   Manteniendo progreso existente (usa --force para resetear)")
+        return existing_progress
 
     # Crear nuevo progress.json
     progress = {
@@ -440,6 +606,11 @@ def create_directory_structure():
 
 def main():
     """Función principal"""
+    import sys
+
+    # Verificar flag --force
+    force = '--force' in sys.argv
+
     print("="*80)
     print("PREPARACIÓN MIGRACIÓN ORACLE → POSTGRESQL")
     print("="*80)
@@ -457,7 +628,7 @@ def main():
     manifest = generate_manifest()
 
     # Inicializar progress
-    progress = initialize_progress(manifest)
+    progress = initialize_progress(manifest, force=force)
 
     # Generar instrucciones para próximo batch
     generate_batch_instructions(manifest, progress)
