@@ -3,7 +3,7 @@
 **Proyecto:** oracle-postgres-migration
 **Tipo:** Plugin de Claude Code
 **Versión:** 1.0.0
-**Última Actualización:** 2025-01-06
+**Última Actualización:** 2026-01-10
 
 ---
 
@@ -17,14 +17,18 @@ Este es un **plugin de Claude Code** que proporciona 4 agentes especializados pa
 
 ## 📖 Documentación Principal - LEER PRIMERO
 
-### Inicio Rápido (5 minutos)
-1. **[README.md](README.md)** ← **EMPEZAR AQUÍ** - Índice principal del plugin
-2. **[QUICKSTART.md](QUICKSTART.md)** - Guía paso a paso de configuración
+### Inicio Rápido
+1. **[README.md](README.md)** ← **EMPEZAR AQUÍ** - Índice principal con inicio rápido (5 minutos)
+2. **[docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md)** - Proceso completo de migración paso a paso
 
 ### Documentación Técnica Completa
-- **[docs/ESTRATEGIA.md](docs/ESTRATEGIA.md)** - Estrategia completa de migración (4 fases, timeline, experimentos)
-- **[docs/TRACKING_SYSTEM.md](docs/TRACKING_SYSTEM.md)** - Sistema de progreso y reanudación automática
-- **[docs/ARQUITECTURA.md](docs/ARQUITECTURA.md)** - Arquitectura del plugin, decisiones de diseño
+
+**Para Usuarios (Ejecutar Migración):**
+- **[docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md)** - Proceso completo de migración (4 fases, timeline, sistema de progreso)
+- **[docs/COMANDOS.md](docs/COMANDOS.md)** - Referencia de comandos de terminal y troubleshooting
+
+**Para Desarrolladores (Mantener/Extender):**
+- **[docs/DESARROLLO.md](docs/DESARROLLO.md)** - Arquitectura del plugin, sistema de parsing, decisiones técnicas
 
 ### Ejemplos Prácticos
 - **[docs/examples/phase1_launch_example.md](docs/examples/phase1_launch_example.md)** - Ejemplo completo Fase 1
@@ -37,9 +41,9 @@ Este es un **plugin de Claude Code** que proporciona 4 agentes especializados pa
 
 ```
 oracle-postgres-migration/          ← Plugin instalado desde marketplace
-├── README.md                       ← Índice principal
-├── QUICKSTART.md                   ← Inicio rápido
+├── README.md                       ← Índice principal con inicio rápido
 ├── CLAUDE.md                       ← Este archivo (contexto para Claude)
+├── CONSOLIDACION_FINAL.md          ← Resumen de consolidación de docs
 ├── .claude-plugin/
 │   └── plugin.json                 ← Manifest del plugin
 ├── agents/                         ← 4 agentes especializados
@@ -48,9 +52,10 @@ oracle-postgres-migration/          ← Plugin instalado desde marketplace
 │   ├── compilation-validator.md   ← Fase 3: Validación
 │   └── shadow-tester.md           ← Fase 4: Testing
 ├── docs/                           ← Documentación técnica
-│   ├── ESTRATEGIA.md
-│   ├── TRACKING_SYSTEM.md
-│   ├── ARQUITECTURA.md
+│   ├── GUIA_MIGRACION.md          ← Para usuarios (proceso completo)
+│   ├── DESARROLLO.md              ← Para desarrolladores (arquitectura)
+│   ├── COMANDOS.md                ← Referencia de comandos
+│   └── examples/
 ├── scripts/                        ← Scripts de soporte
 │   ├── prepare_migration.py
 │   ├── update_progress.py
@@ -185,7 +190,7 @@ claude
 - ✅ Sin reprocesar objetos completados
 - ✅ Progreso visible en todo momento
 
-Ver detalles: **[docs/TRACKING_SYSTEM.md](docs/TRACKING_SYSTEM.md)**
+Ver detalles: **[docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md)** - Sección "Sistema de Progreso y Reanudación"
 
 ---
 
@@ -302,10 +307,22 @@ Ver guía completa: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
 ## 📚 Archivos Archivados
 
-**[archived/](archived/)** - Documentos obsoletos de sesiones anteriores:
-- `PLUGIN_CREATED.md` - Reporte de creación (ya no necesario)
-- `SISTEMA_COMPLETO.md` - Resumen duplicado (contenido movido a docs/)
-- `CLAUDE.md.old` - Versión anterior (backup)
+**[archived/](archived/)** - Documentos consolidados y archivos obsoletos:
+
+**Scripts Obsoletos:**
+- `scripts/prepare_migration_v3_improved.py` - Demo incompleta (usar v2.1 en su lugar)
+- `scripts/test_parsing_v2.py` - Test obsoleto (usar validate_parsing.py)
+
+**Documentación Consolidada (2026-01-10):**
+- `docs/ARQUITECTURA.md` → Consolidado en `DESARROLLO.md`
+- `docs/ESTRATEGIA.md` → Consolidado en `GUIA_MIGRACION.md`
+- `docs/OBJETOS_CONTEXTO.md` → Split entre `GUIA_MIGRACION.md` y `DESARROLLO.md`
+- `docs/TRACKING_SYSTEM.md` → Consolidado en `GUIA_MIGRACION.md`
+- `docs/PARSING_ANALYSIS.md` → Consolidado en `DESARROLLO.md`
+- `docs/VALIDATION_REPORT.md` → Consolidado en `DESARROLLO.md`
+- `docs/COMANDOS_GUIA.md` → Obsoleto (comandos slash no implementados)
+
+Ver `archived/README.md` para detalles completos.
 
 ---
 
@@ -330,14 +347,15 @@ Ver guía completa: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
 **Cuando una nueva sesión de Claude Code se inicie con este plugin:**
 
-1. **Leer primero:** Este archivo (CLAUDE.md) para entender el contexto
+1. **Leer primero:** Este archivo (CLAUDE.md) para entender el contexto completo
 2. **Índice principal:** Ver [README.md](README.md) para navegación completa
-3. **Entender estrategia:** Ver [docs/ESTRATEGIA.md](docs/ESTRATEGIA.md) para flujo completo
-4. **Verificar progreso:** Leer `phantomx-nexus/sql/extracted/progress.json` si existe
-5. **Determinar siguiente acción:**
-   - Si progress.json no existe → Guiar al usuario a ejecutar prepare_migration.py
+3. **Entender el proceso:** Ver [docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md) para las 4 fases detalladas
+4. **Arquitectura técnica:** Ver [docs/DESARROLLO.md](docs/DESARROLLO.md) para decisiones de diseño
+5. **Verificar progreso:** Leer `sql/extracted/progress.json` si existe en el directorio actual
+6. **Determinar siguiente acción:**
+   - Si progress.json no existe → Guiar al usuario a ejecutar `prepare_migration_v2.py`
    - Si processed_count = 0 → Sugerir iniciar Fase 1
-   - Si processed_count > 0 → Mostrar progreso y preguntar si continuar
+   - Si processed_count > 0 → Mostrar progreso actual y preguntar si continuar
 
 **Contexto clave a recordar:**
 - Este es un PLUGIN instalado desde marketplace, no parte del proyecto del usuario
@@ -347,9 +365,23 @@ Ver guía completa: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 - El usuario debe copiar los scripts (prepare_migration.py, update_progress.py) a su proyecto
 - Documentación en español, código en inglés
 
+**Estructura de Documentación (Consolidada 2026-01-10):**
+- **Organizada por AUDIENCIA**, no por tema
+- **3 documentos principales:** GUIA_MIGRACION.md (usuarios), DESARROLLO.md (desarrolladores), COMANDOS.md (referencia)
+- **Aplicadas mejores prácticas:** Divio Documentation System, Single Source of Truth, máximo 5 documentos
+- **Sin duplicación:** Cada información existe en UN solo lugar
+- **Documentos antiguos:** Todos consolidados y movidos a `archived/docs/` (ver `archived/README.md`)
+
+**Cuando el usuario pregunte por información:**
+1. **Proceso de migración/fases** → `GUIA_MIGRACION.md`
+2. **Arquitectura/diseño técnico** → `DESARROLLO.md`
+3. **Comandos/troubleshooting** → `COMANDOS.md`
+4. **Parsing/validación** → `DESARROLLO.md` (sección Sistema de Parsing)
+5. **Sistema de progreso** → `GUIA_MIGRACION.md` (sección Sistema de Progreso y Reanudación)
+
 ---
 
-**Última Actualización:** 2025-01-06
+**Última Actualización:** 2026-01-10
 **Versión:** 1.0.0
-**Estado:** Plugin reorganizado y listo para uso
-**Próximo Paso:** Ver [README.md](README.md) y [QUICKSTART.md](QUICKSTART.md)
+**Estado:** Documentación consolidada, parsing validado (90.2% valid), listo para migración
+**Próximo Paso:** Ver [README.md](README.md) → [GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md) → Iniciar Fase 1

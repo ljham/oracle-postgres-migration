@@ -1,5 +1,5 @@
 ---
-name: analyze
+name: migrate-analyze
 description: Analizar objetos PL/SQL de Oracle y clasificarlos en SIMPLE/COMPLEX
 arguments:
   - name: batch
@@ -12,16 +12,16 @@ arguments:
     default: "200"
 ---
 
-# Comando: /analyze
+# Comando: /migrate-analyze
 
 Ejecuta la **Fase 1: Análisis y Clasificación** de objetos PL/SQL.
 
 ## Uso
 
 ```bash
-/analyze                    # Procesa siguiente batch pendiente (200 objetos)
-/analyze 001                # Procesa batch específico
-/analyze next 100           # Procesa siguiente batch con 100 objetos
+/migrate-analyze                    # Procesa siguiente batch pendiente (200 objetos)
+/migrate-analyze 001                # Procesa batch específico
+/migrate-analyze next 100           # Procesa siguiente batch con 100 objetos
 ```
 
 ## Lo que hace este comando

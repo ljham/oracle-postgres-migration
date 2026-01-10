@@ -1,5 +1,5 @@
 ---
-name: status
+name: migrate-status
 description: Mostrar estado actual de la migración y progreso por fases
 arguments:
   - name: phase
@@ -8,18 +8,18 @@ arguments:
     default: "all"
 ---
 
-# Comando: /status
+# Comando: /migrate-status
 
 Muestra el **estado completo de la migración** Oracle → PostgreSQL.
 
 ## Uso
 
 ```bash
-/status           # Muestra progreso de todas las fases
-/status 1         # Muestra solo Fase 1 (Análisis)
-/status 2         # Muestra solo Fase 2 (Conversión)
-/status 3         # Muestra solo Fase 3 (Validación)
-/status 4         # Muestra solo Fase 4 (Testing)
+/migrate-status           # Muestra progreso de todas las fases
+/migrate-status 1         # Muestra solo Fase 1 (Análisis)
+/migrate-status 2         # Muestra solo Fase 2 (Conversión)
+/migrate-status 3         # Muestra solo Fase 3 (Validación)
+/migrate-status 4         # Muestra solo Fase 4 (Testing)
 ```
 
 ## Lo que muestra
@@ -128,11 +128,11 @@ Voy a mostrar el **estado actual de la migración** leyendo los archivos de prog
 4. **Mostrar siguiente acción recomendada**
 
    Basándome en el estado actual, recomendaré:
-   - Si Fase 1 incompleta → Ejecutar `/analyze next`
+   - Si Fase 1 incompleta → Ejecutar `/migrate-analyze next`
    - Si Fase 1 completa y Fase 2A no ejecutada → Ejecutar `bash scripts/convert_simple_objects.sh`
-   - Si Fase 2A completa y Fase 2B incompleta → Ejecutar `/convert next`
-   - Si Fase 2 completa y Fase 3 incompleta → Ejecutar `/validate next`
-   - Si Fase 3 >95% éxito y Fase 4 incompleta → Ejecutar `/test next`
+   - Si Fase 2A completa y Fase 2B incompleta → Ejecutar `/migrate-convert next`
+   - Si Fase 2 completa y Fase 3 incompleta → Ejecutar `/migrate-validate next`
+   - Si Fase 3 >95% éxito y Fase 4 incompleta → Ejecutar `/migrate-test next`
    - Si Fase 4 >95% match → **¡MIGRACIÓN COMPLETA!** 🎉
 
 5. **Detectar problemas**

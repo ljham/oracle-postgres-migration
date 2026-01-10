@@ -42,7 +42,7 @@ cd /path/to/tu-proyecto
 mkdir -p scripts
 cp ~/.claude/plugins/oracle-postgres-migration/scripts/prepare_migration.py scripts/
 cp ~/.claude/plugins/oracle-postgres-migration/scripts/update_progress.py scripts/
-cp ~/.claude/plugins/oracle-postgres-migration/scripts/convert_simple_objects.sh scripts/
+cp ~/.claude/plugins/oracle-postgres-migration/scripts/migrate-convert_simple_objects.sh scripts/
 
 # Generar archivos manifest y progress tracking
 python scripts/prepare_migration.py
@@ -70,23 +70,42 @@ Lee el manifest desde sql/extracted/manifest.json para saber qué objetos proces
 
 ### 4. Continuar Leyendo
 
-- **[QUICKSTART.md](QUICKSTART.md)** - Guía detallada paso a paso
-- **[docs/ESTRATEGIA.md](docs/ESTRATEGIA.md)** - Estrategia completa de migración
+- **[docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md)** - Proceso completo de migración
+- **[docs/COMANDOS.md](docs/COMANDOS.md)** - Referencia de comandos
 - **[CLAUDE.md](CLAUDE.md)** - Contexto completo del plugin para Claude
 
 ---
 
 ## 📚 Documentación
 
-### Primeros Pasos
-- **[QUICKSTART.md](QUICKSTART.md)** - Guía de inicio rápido
-- **[examples/phase1_launch_example.md](examples/phase1_launch_example.md)** - Ejemplo completo Fase 1
+### 🚀 Para Usuarios (Ejecutar Migración)
 
-### Documentación Técnica
-- **[docs/ESTRATEGIA.md](docs/ESTRATEGIA.md)** - Estrategia completa (4 fases, timeline, capacidad)
-- **[docs/TRACKING_SYSTEM.md](docs/TRACKING_SYSTEM.md)** - Sistema de seguimiento y reanudación
-- **[docs/ARQUITECTURA.md](docs/ARQUITECTURA.md)** - Arquitectura del plugin y decisiones de diseño
-- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Problemas comunes y soluciones
+1. **[docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md)** - Proceso completo de migración
+   - Qué se migra (EJECUTABLES vs REFERENCIA)
+   - Las 4 fases explicadas
+   - Sistema de progreso y reanudación
+   - Timeline y capacidad
+   - Instalación y primer uso
+2. **[docs/COMANDOS.md](docs/COMANDOS.md)** - Referencia de comandos de terminal
+   - Comandos de preparación y validación
+   - Troubleshooting paso a paso
+   - Ejemplos prácticos
+
+### 🔧 Para Desarrolladores (Mantener/Extender Plugin)
+
+1. **[docs/DESARROLLO.md](docs/DESARROLLO.md)** - Guía técnica completa
+   - Arquitectura del plugin
+   - Sistema de parsing (cómo funciona)
+   - Decisiones de diseño
+   - Cómo extender el plugin
+2. **[CLAUDE.md](CLAUDE.md)** - Contexto completo para Claude
+3. **[.claude-plugin/](./.claude-plugin/)** - Configuración y agentes
+
+### 📖 Ejemplos
+- **[docs/examples/phase1_launch_example.md](docs/examples/phase1_launch_example.md)** - Ejemplo completo Fase 1
+
+### 📦 Archivos Archivados
+- **[archived/](archived/)** - Documentos consolidados y scripts obsoletos (no usar)
 
 ---
 
@@ -174,52 +193,52 @@ El plugin incluye **6 comandos slash** que facilitan la invocación de los agent
 
 | Comando | Descripción | Ejemplo |
 |---------|-------------|---------|
-| `/init` | Inicializa proyecto (manifest, progress, directorios) | `/init` |
-| `/status` | Muestra progreso de todas las fases | `/status` |
+| `/migrate-init` | Inicializa proyecto (manifest, progress, directorios) | `/migrate-init` |
+| `/migrate-status` | Muestra progreso de todas las fases | `/migrate-status` |
 
 ### Comandos de Fases
 
 | Comando | Fase | Descripción | Ejemplo |
 |---------|------|-------------|---------|
-| `/analyze` | 1 | Analiza y clasifica objetos PL/SQL | `/analyze next` |
-| `/convert` | 2B | Convierte objetos complejos | `/convert next` |
-| `/validate` | 3 | Valida compilación en PostgreSQL | `/validate next` |
-| `/test` | 4 | Shadow testing Oracle vs PostgreSQL | `/test next 50` |
+| `/migrate-analyze` | 1 | Analiza y clasifica objetos PL/SQL | `/migrate-analyze next` |
+| `/migrate-convert` | 2B | Convierte objetos complejos | `/migrate-convert next` |
+| `/migrate-validate` | 3 | Valida compilación en PostgreSQL | `/migrate-validate next` |
+| `/migrate-test` | 4 | Shadow testing Oracle vs PostgreSQL | `/migrate-test next 50` |
 
 **Ejemplo de flujo completo:**
 
 ```bash
 # Inicializar
-/init
+/migrate-init
 
 # Verificar estado
-/status
+/migrate-status
 
 # Fase 1: Análisis
-/analyze next          # Procesa 200 objetos
-/analyze next          # Repetir hasta completar
+/migrate-analyze next          # Procesa 200 objetos
+/migrate-analyze next          # Repetir hasta completar
 
 # Fase 2A: Conversión simple (LOCAL)
-bash scripts/convert_simple_objects.sh
+bash scripts/migrate-convert_simple_objects.sh
 
 # Fase 2B: Conversión compleja
-/convert next          # Procesa 200 objetos complejos
-/convert next          # Repetir hasta completar
+/migrate-convert next          # Procesa 200 objetos complejos
+/migrate-convert next          # Repetir hasta completar
 
 # Fase 3: Validación
-/validate next         # Valida 200 objetos
-/validate next         # Repetir hasta completar
+/migrate-validate next         # Valida 200 objetos
+/migrate-validate next         # Repetir hasta completar
 
 # Fase 4: Testing
-/test next            # Testea 50 objetos
-/test next            # Repetir hasta completar
+/migrate-test next            # Testea 50 objetos
+/migrate-test next            # Repetir hasta completar
 
 # Verificar éxito
-/status               # Debe mostrar 100% en todas las fases
+/migrate-status               # Debe mostrar 100% en todas las fases
 ```
 
 **Beneficios de los comandos:**
-- ✅ **Sintaxis simple:** `/analyze` vs `Task plsql-analyzer "..."`
+- ✅ **Sintaxis simple:** `/migrate-analyze` vs `Task plsql-analyzer "..."`
 - ✅ **Argumentos con defaults:** No necesitas recordar parámetros
 - ✅ **Validaciones automáticas:** Verifica pre-requisitos antes de ejecutar
 - ✅ **Progreso automático:** Actualiza `progress.json` sin intervención
@@ -370,7 +389,7 @@ claude
 ### Ejemplo 3: Ejecutar Fase 2A Localmente (Sin Claude)
 ```bash
 # Después de completar Fase 1
-bash scripts/convert_simple_objects.sh
+bash scripts/migrate-convert_simple_objects.sh
 
 # Output: migrated/simple/*.sql (~5,000 objetos)
 ```
@@ -431,6 +450,6 @@ Herramienta interna para proyecto de migración phantomx-nexus.
 
 ---
 
-**Última Actualización:** 2025-01-06
+**Última Actualización:** 2026-01-10
 **Versión del Plugin:** 1.0.0
-**Próximos Pasos:** Ver [QUICKSTART.md](QUICKSTART.md) para comenzar Fase 1
+**Próximos Pasos:** Ver [docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md) para comenzar Fase 1

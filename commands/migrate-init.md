@@ -1,5 +1,5 @@
 ---
-name: init
+name: migrate-init
 description: Inicializar proyecto de migración (generar manifest, progress y estructura de directorios)
 arguments:
   - name: force
@@ -8,15 +8,15 @@ arguments:
     default: "false"
 ---
 
-# Comando: /init
+# Comando: /migrate-init
 
 Inicializa el **proyecto de migración** Oracle → PostgreSQL.
 
 ## Uso
 
 ```bash
-/init              # Configuración inicial (solo si no existe)
-/init force        # Regenerar todo (sobrescribir existente)
+/migrate-init              # Configuración inicial (solo si no existe)
+/migrate-init force        # Regenerar todo (sobrescribir existente)
 ```
 
 ## Pre-requisitos
@@ -122,7 +122,7 @@ Voy a **inicializar el proyecto de migración** ejecutando la preparación compl
    ```bash
    # Modo NORMAL: Solo si no existe
    if [ -f sql/extracted/manifest.json ]; then
-     echo "⚠️ Manifest ya existe. Usar /init force para regenerar."
+     echo "⚠️ Manifest ya existe. Usar /migrate-init force para regenerar."
    else
      python scripts/prepare_migration.py
    fi
@@ -206,7 +206,7 @@ Voy a **inicializar el proyecto de migración** ejecutando la preparación compl
    ║  Estado: LISTO PARA INICIAR                ║
    ╚════════════════════════════════════════════╝
 
-   Siguiente paso: /analyze next
+   Siguiente paso: /migrate-analyze next
    ```
 
 **Troubleshooting:**

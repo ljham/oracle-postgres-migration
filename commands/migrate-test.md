@@ -1,5 +1,5 @@
 ---
-name: test
+name: migrate-test
 description: Ejecutar shadow testing comparativo entre Oracle y PostgreSQL
 arguments:
   - name: batch
@@ -16,17 +16,17 @@ arguments:
     default: "both"
 ---
 
-# Comando: /test
+# Comando: /migrate-test
 
 Ejecuta la **Fase 4: Shadow Testing Comparativo** Oracle vs PostgreSQL.
 
 ## Uso
 
 ```bash
-/test                       # Testea siguiente batch pendiente (50 objetos)
-/test 001                   # Testea batch específico
-/test next 20 unit          # Testea 20 objetos (solo pruebas unitarias)
-/test all 10 integration    # Testea todos los objetos (solo integración)
+/migrate-test                       # Testea siguiente batch pendiente (50 objetos)
+/migrate-test 001                   # Testea batch específico
+/migrate-test next 20 unit          # Testea 20 objetos (solo pruebas unitarias)
+/migrate-test all 10 integration    # Testea todos los objetos (solo integración)
 ```
 
 ## Pre-requisitos

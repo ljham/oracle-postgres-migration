@@ -24,11 +24,11 @@
     "./agents/shadow-tester.md"
   ],
   "commands": [
-    "./commands/init.md",
-    "./commands/analyze.md",
-    "./commands/convert.md",
-    "./commands/validate.md",
-    "./commands/test.md",
-    "./commands/status.md"
+    "./commands/migrate-init.md",
+    "./commands/migrate-analyze.md",
+    "./commands/migrate-convert.md",
+    "./commands/migrate-validate.md",
+    "./commands/migrate-test.md",
+    "./commands/migrate-status.md"
   ]
 }

@@ -1,5 +1,5 @@
 ---
-name: validate
+name: migrate-validate
 description: Validar compilación de objetos migrados en PostgreSQL 17.4
 arguments:
   - name: batch
@@ -16,17 +16,17 @@ arguments:
     default: "all"
 ---
 
-# Comando: /validate
+# Comando: /migrate-validate
 
 Ejecuta la **Fase 3: Validación de Compilación** en PostgreSQL 17.4.
 
 ## Uso
 
 ```bash
-/validate                    # Valida siguiente batch pendiente (todos los tipos)
-/validate 001                # Valida batch específico
-/validate next 100 complex   # Valida solo objetos complejos
-/validate all 50 simple      # Valida todos los objetos simples (batches de 50)
+/migrate-validate                    # Valida siguiente batch pendiente (todos los tipos)
+/migrate-validate 001                # Valida batch específico
+/migrate-validate next 100 complex   # Valida solo objetos complejos
+/migrate-validate all 50 simple      # Valida todos los objetos simples (batches de 50)
 ```
 
 ## Pre-requisitos

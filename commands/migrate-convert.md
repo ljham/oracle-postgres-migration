@@ -1,5 +1,5 @@
 ---
-name: convert
+name: migrate-convert
 description: Convertir objetos PL/SQL complejos a PostgreSQL usando estrategias arquitectónicas
 arguments:
   - name: batch
@@ -15,17 +15,17 @@ arguments:
     required: false
 ---
 
-# Comando: /convert
+# Comando: /migrate-convert
 
 Ejecuta la **Fase 2B: Conversión de Objetos Complejos** usando estrategias arquitectónicas.
 
 ## Uso
 
 ```bash
-/convert                           # Procesa siguiente batch de objetos complejos
-/convert 001                       # Procesa batch específico
-/convert next 100                  # Procesa 100 objetos del siguiente batch
-/convert next 50 UTL_HTTP          # Procesa solo objetos con estrategia UTL_HTTP
+/migrate-convert                           # Procesa siguiente batch de objetos complejos
+/migrate-convert 001                       # Procesa batch específico
+/migrate-convert next 100                  # Procesa 100 objetos del siguiente batch
+/migrate-convert next 50 UTL_HTTP          # Procesa solo objetos con estrategia UTL_HTTP
 ```
 
 ## Pre-requisitos

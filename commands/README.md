@@ -159,7 +159,7 @@ Cuando Claude Code ejecuta un comando:
 // Cuando el usuario ejecuta: /analyze 001
 // Claude Code hace internamente:
 
-const command = readCommand("commands/analyze.md");
+const command = readCommand("commands/migrate-analyze.md");
 const args = {
   batch: "001",           // Proporcionado por usuario
   count: "200"            // Default del comando
@@ -254,7 +254,7 @@ Voy a ejecutar {{arg1}}...
 ```json
 {
   "commands": [
-    "commands/init.md",
+    "commands/migrate-init.md",
     "commands/mi-comando.md",  ← Agregar aquí
     "..."
   ]
