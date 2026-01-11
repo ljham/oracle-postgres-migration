@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
 """
-Script de preparación para migración Oracle → PostgreSQL (VERSIÓN MEJORADA v2.1)
+Script de preparación para migración Oracle → PostgreSQL (VERSIÓN 3.0 - ORDEN CORRECTO)
 
 MEJORAS EN ESTA VERSIÓN:
-- Parsing más robusto que busca END con el nombre EXACTO del objeto
-- Evita capturar END LOOP, END IF, o procedimientos internos
-- NUEVO v2.1: Estrategia especial para TRIGGERS con nombres diferentes en END
-- Validación de extracción con checksums
-- Logging detallado de errores de parsing
-- Modo dry-run para verificar antes de generar manifest
+- Procesa objetos en el ORDEN DE COMPILACIÓN de Oracle
+- Distingue correctamente objetos REFERENCIA vs EJECUTABLES
+- VIEWS/MVIEWS en ambas categorías (referencia + ejecutables)
+- Incluye JOBS y DIRECTORIES (opcionales)
+- Manifest ordenado para análisis óptimo por el agente
 
-CAMBIOS CLAVE:
-1. Captura el nombre del objeto PRIMERO desde el CREATE statement
-2. Busca END seguido del NOMBRE EXACTO del objeto (no cualquier \w+)
-3. Incluye validación de que el código extraído es válido
-4. Genera reporte de objetos problemáticos
+ORDEN DE PROCESAMIENTO (Sigue compilación Oracle):
+1. TYPES           → Tipos de datos base
+2. SEQUENCES       → Secuencias para IDs
+3. TABLES          → Tablas (usan types)
+4. PRIMARY_KEYS    → Constraints PK (usan tables)
+5. FOREIGN_KEYS    → Constraints FK (usan tables)
+6. DIRECTORIES     → Directorios (para UTL_FILE) [OPCIONAL]
+7. VIEWS           → Views (usan tables, types)
+8. MVIEWS          → Materialized Views (usan views, tables)
+9. FUNCTIONS       → Funciones (usan todo lo anterior)
+10. PROCEDURES     → Procedures (usan functions)
+11. PACKAGE_SPEC   → Package specs (definen interfaz)
+12. PACKAGE_BODY   → Package bodies (implementan spec)
+13. TRIGGERS       → Triggers (usan packages, functions)
+14. JOBS           → Jobs (programación de ejecución) [OPCIONAL]
 
-Uso (desde el proyecto con datos, NO desde el plugin):
+Uso:
     cd /path/to/phantomx-nexus
-    python /path/to/oracle-postgres-migration/scripts/prepare_migration_v2.py [--dry-run]
+    python /path/to/oracle-postgres-migration/scripts/prepare_migration_v3.py [opciones]
 
-    --dry-run: Solo valida parsing sin generar manifest.json
+Opciones:
+    --dry-run           Solo valida parsing sin generar manifest
+    --force             Sobrescribir progress.json existente
 """
 
 import re
@@ -30,7 +41,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 
-# Directorio base del proyecto (usa CWD para compatibilidad con --plugin-dir)
+# Directorio base del proyecto
 BASE_DIR = Path.cwd()
 EXTRACTED_DIR = BASE_DIR / "sql" / "extracted"
 OBJECTS_DIR = EXTRACTED_DIR / "objects"
@@ -38,12 +49,12 @@ MANIFEST_FILE = EXTRACTED_DIR / "manifest.json"
 PROGRESS_FILE = EXTRACTED_DIR / "progress.json"
 VALIDATION_LOG = EXTRACTED_DIR / "parsing_validation.log"
 
-# Tracking de errores de parsing
+# Tracking de errores
 parsing_errors = []
 
 
 def log_parsing_error(error_msg: str, object_info: Dict = None):
-    """Log de errores de parsing para debugging."""
+    """Log de errores de parsing."""
     error_entry = {
         "timestamp": datetime.now().isoformat(),
         "error": error_msg,
@@ -97,12 +108,14 @@ def find_object_end_robust(
     """
     Encuentra el fin del objeto de forma robusta usando el nombre EXACTO del objeto.
 
-    ESTRATEGIA:
-    1. Buscar "END nombre_exacto;" - Funciona cuando el END tiene el mismo nombre que el CREATE
+    ESTRATEGIA (TODAS incluyen el delimitador / obligatorio):
+    1. Buscar "END nombre_exacto; / " - Funciona cuando el END tiene el mismo nombre que el CREATE
     2. Para TRIGGER: Buscar "END cualquier_nombre; / " - Los triggers a menudo tienen nombres diferentes
-    3. Para FUNCTION/PROCEDURE/TRIGGER: Buscar "END;" sin nombre
-    4. Para PACKAGE: Buscar último "END;" en el rango
+    3. Para FUNCTION/PROCEDURE/TRIGGER: Buscar "END; / " sin nombre
+    4. Para PACKAGE: Buscar último "END; / " en el rango
     5. FALLBACK: Usar end_pos (loguea warning)
+
+    IMPORTANTE: El delimitador / es OBLIGATORIO y parte del código PL/SQL.
 
     Args:
         content: Contenido completo del archivo
@@ -116,57 +129,61 @@ def find_object_end_robust(
     """
     search_content = content[start_pos:end_pos]
 
-    # ESTRATEGIA 1: Buscar END con el nombre exacto del objeto (termina en ;)
-    # Ejemplo: END FAC_K_VERIFICA_CIERRES;
-    # No incluye el delimitador / porque no es parte del código PL/SQL
-    pattern_exact = rf'END\s+{re.escape(object_name)}\s*;'
-    match_exact = re.search(pattern_exact, search_content, re.IGNORECASE)
+    # ESTRATEGIA 1: Buscar END con el nombre exacto del objeto + delimitador /
+    # Formato: END nombre; + [comentario opcional] + nueva línea + [comentarios/líneas en blanco] + /
+    # El delimitador / SÍ es parte del código PL/SQL (separa objetos)
+    # Permite comentarios inline (--END PACKAGE BODY) y múltiples líneas en blanco/comentarios antes del /
+    pattern_exact_with_slash = rf'END\s+{re.escape(object_name)}\s*;(?:--[^\n]*)?(?:[\s]|--[^\n]*\n)*/'
+    match_exact = re.search(pattern_exact_with_slash, search_content, re.IGNORECASE | re.DOTALL)
 
     if match_exact:
         actual_end = start_pos + match_exact.end()
-        return actual_end, "exact_name_semicolon"
+        return actual_end, "exact_name_with_slash"
 
     # ESTRATEGIA 2: Para TRIGGER - Buscar END con cualquier nombre seguido de /
     # Los triggers a veces terminan con un nombre diferente al del CREATE
     # Ejemplo: CREATE TRIGGER AGE_T_X ... END AGE_T_LOG_Y; /
     if object_type == "TRIGGER":
         # Buscar END [cualquier_nombre]; seguido de nueva línea y /
-        pattern_trigger_end = r'END\s+\w+\s*;\s*\n\s*/\s*(?=\n|$)'
-        match_trigger = re.search(pattern_trigger_end, search_content, re.IGNORECASE)
+        # Permite comentarios inline y múltiples líneas en blanco/comentarios antes del /
+        pattern_trigger_end = r'END\s+\w+\s*;(?:--[^\n]*)?(?:[\s]|--[^\n]*\n)*/\s*(?=\n|$)'
+        match_trigger = re.search(pattern_trigger_end, search_content, re.IGNORECASE | re.DOTALL)
 
         if match_trigger:
             actual_end = start_pos + match_trigger.end()
             return actual_end, "trigger_end_with_slash"
 
     # ESTRATEGIA 3: Para FUNCTION/PROCEDURE/TRIGGER que pueden usar solo END;
-    # Buscar END; seguido de / (pero evitar END LOOP; END IF;)
+    # Buscar END; seguido de / obligatorio (pero evitar END LOOP; END IF;)
     if object_type in ["FUNCTION", "PROCEDURE", "TRIGGER"]:
-        # Buscar END; que NO sea precedido por LOOP o IF
-        pattern_end_only = r'(?<!LOOP\s)(?<!IF\s)END\s*;\s*\n?\s*/?'
+        # Buscar END; que NO sea precedido por LOOP o IF, seguido de /
+        # Permite comentarios inline y múltiples líneas en blanco/comentarios antes del /
+        pattern_end_only = r'(?<!LOOP\s)(?<!IF\s)END\s*;(?:--[^\n]*)?(?:[\s]|--[^\n]*\n)*/'
 
         # Buscar todas las coincidencias y tomar la última (más probable que sea el END del objeto)
-        matches = list(re.finditer(pattern_end_only, search_content, re.IGNORECASE))
+        matches = list(re.finditer(pattern_end_only, search_content, re.IGNORECASE | re.DOTALL))
         if matches:
             # Tomar el último match (más conservador)
             last_match = matches[-1]
             actual_end = start_pos + last_match.end()
-            return actual_end, "end_only_last_match"
+            return actual_end, "end_only_with_slash"
 
     # ESTRATEGIA 4: Para PACKAGE sin nombre en END (raro pero posible)
-    # Buscar END; seguido de / al final del search_content
+    # Buscar END; seguido de / obligatorio al final del search_content
     if object_type in ["PACKAGE_BODY", "PACKAGE_SPEC"]:
-        # Buscar END; cerca del final del rango de búsqueda
-        pattern_end_near_end = r'END\s*;\s*\n?\s*/?'
-        matches = list(re.finditer(pattern_end_near_end, search_content, re.IGNORECASE))
+        # Buscar END; cerca del final del rango de búsqueda con / obligatorio
+        # Permite comentarios inline y múltiples líneas en blanco/comentarios antes del /
+        pattern_end_near_end = r'END\s*;(?:--[^\n]*)?(?:[\s]|--[^\n]*\n)*/'
+        matches = list(re.finditer(pattern_end_near_end, search_content, re.IGNORECASE | re.DOTALL))
         if matches:
             # Tomar el último match
             last_match = matches[-1]
             actual_end = start_pos + last_match.end()
-            return actual_end, "end_near_end_of_range"
+            return actual_end, "end_with_slash_near_end"
 
     # ESTRATEGIA 5: FALLBACK - Usar end_pos (menos preciso, loguear warning)
     log_parsing_error(
-        f"No se encontró END exacto para {object_type} '{object_name}', usando end_pos",
+        f"No se encontró END exacto para {object_type} '{object_name}'",
         {"object_name": object_name, "object_type": object_type}
     )
     return end_pos, "fallback_end_pos"
@@ -178,8 +195,9 @@ def validate_extracted_code(code: str, object_name: str, object_type: str) -> Tu
 
     Verificaciones:
     1. Inicia con CREATE OR REPLACE [PACKAGE BODY|FUNCTION|PROCEDURE|TRIGGER|VIEW]
-    2. Termina con END; o END nombre; seguido de /
+    2. Termina con END; o END nombre; OBLIGATORIAMENTE seguido de / (objetos PL/SQL)
     3. No contiene múltiples CREATE statements (indicaría parsing incorrecto)
+    4. PACKAGE_BODY contiene al menos un PROCEDURE o FUNCTION
 
     Args:
         code: Código extraído
@@ -193,15 +211,18 @@ def validate_extracted_code(code: str, object_name: str, object_type: str) -> Tu
     if not re.match(r'^\s*CREATE', code, re.IGNORECASE):
         return False, "No inicia con CREATE"
 
-    # Verificación 2: Debe terminar con END; o END nombre; (opcionalmente seguido de /)
+    # Verificación 2: Debe terminar con END; o END nombre; OBLIGATORIAMENTE seguido de /
     if object_type in ["FUNCTION", "PROCEDURE", "PACKAGE_SPEC", "PACKAGE_BODY", "TRIGGER"]:
-        end_pattern = rf'(END\s+{re.escape(object_name)}\s*;|END\s*;)\s*/?$'
-        if not re.search(end_pattern, code.strip(), re.IGNORECASE):
-            return False, f"No termina con END {object_name}; o END;"
-
+        # El / es OBLIGATORIO para objetos PL/SQL
+        # Permite comentarios inline y múltiples líneas en blanco/comentarios antes del /
+        end_pattern = rf'(END\s+{re.escape(object_name)}\s*;|END\s*;)(?:--[^\n]*)?(?:[\s]|--[^\n]*\n)*/$'
+        if not re.search(end_pattern, code.strip(), re.IGNORECASE | re.DOTALL):
+            return False, f"No termina con END {object_name}; / o END; /"
     # Verificación 3: No debe contener múltiples CREATE statements
-    create_count = len(re.findall(r'\bCREATE\s+(OR\s+REPLACE\s+)?(PACKAGE|FUNCTION|PROCEDURE|TRIGGER|VIEW)',
-                                    code, re.IGNORECASE))
+    create_count = len(re.findall(
+        r'\bCREATE\s+(OR\s+REPLACE\s+)?(PACKAGE|FUNCTION|PROCEDURE|TRIGGER|VIEW)',
+        code, re.IGNORECASE
+    ))
     if create_count > 1:
         return False, f"Contiene {create_count} CREATE statements (esperado: 1)"
 
@@ -232,6 +253,11 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
     """
     print(f"📖 Parseando {file_path.name}...")
 
+    """Parsea archivo SQL y extrae objetos individuales."""
+    if not file_path.exists():
+        print(f"⚠️  Archivo no encontrado: {file_path}")
+        return []
+
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -244,12 +270,7 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
 
         for i, match in enumerate(matches):
             start_pos = match.start()
-
-            # Determinar rango de búsqueda
-            if i < len(matches) - 1:
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content)
+            end_pos = matches[i + 1].start() if i < len(matches) - 1 else len(content)
 
             # Extraer nombre del objeto
             object_name = extract_object_name(match)
@@ -263,6 +284,7 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
 
             # Validar código extraído
             is_valid, error_msg = validate_extracted_code(object_code, object_name, object_type)
+
             if not is_valid:
                 log_parsing_error(
                     f"{object_type} '{object_name}': {error_msg} (método: {method})",
@@ -288,33 +310,30 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
                 "line_end": lines_before + lines_in_object - 1,
                 "char_start": start_pos,
                 "char_end": actual_end,
-                "code_length": len(object_code),
+                "code_length": actual_end - start_pos,
                 "status": "pending",
                 "parsing_method": method,
                 "validation_status": "valid" if is_valid else "warning"
             })
 
     elif object_type == "PACKAGE_SPEC":
-        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))\s+(IS|AS)'
+        # Patrón mejorado que permite cláusulas como AUTHID CURRENT_USER antes de IS/AS
+        # [^\n]*? permite cualquier contenido en la misma línea (no cruza líneas)
+        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[^\n]*?\s+(IS|AS)'
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
             start_pos = match.start()
-
-            if i < len(matches) - 1:
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content)
+            end_pos = matches[i + 1].start() if i < len(matches) - 1 else len(content)
 
             object_name = extract_object_name(match)
-
             actual_end, method = find_object_end_robust(
                 content, start_pos, end_pos, object_name, object_type
             )
 
             object_code = content[start_pos:actual_end].strip()
-
             is_valid, error_msg = validate_extracted_code(object_code, object_name, object_type)
+
             if not is_valid:
                 log_parsing_error(
                     f"PACKAGE_SPEC '{object_name}': {error_msg} (método: {method})",
@@ -339,33 +358,30 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
                 "line_end": lines_before + lines_in_object - 1,
                 "char_start": start_pos,
                 "char_end": actual_end,
-                "code_length": len(object_code),
+                "code_length": actual_end - start_pos,
                 "status": "pending",
                 "parsing_method": method,
                 "validation_status": "valid" if is_valid else "warning"
             })
 
     elif object_type == "PACKAGE_BODY":
-        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+BODY\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))\s+(IS|AS)'
+        # Patrón mejorado que permite cláusulas como AUTHID CURRENT_USER antes de IS/AS
+        # [^\n]*? permite cualquier contenido en la misma línea (no cruza líneas)
+        pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+BODY\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[^\n]*?\s+(IS|AS)'
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
             start_pos = match.start()
-
-            if i < len(matches) - 1:
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content)
+            end_pos = matches[i + 1].start() if i < len(matches) - 1 else len(content)
 
             object_name = extract_object_name(match)
-
             actual_end, method = find_object_end_robust(
                 content, start_pos, end_pos, object_name, object_type
             )
 
             object_code = content[start_pos:actual_end].strip()
-
             is_valid, error_msg = validate_extracted_code(object_code, object_name, object_type)
+
             if not is_valid:
                 log_parsing_error(
                     f"PACKAGE_BODY '{object_name}': {error_msg} (método: {method})",
@@ -390,7 +406,7 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
                 "line_end": lines_before + lines_in_object - 1,
                 "char_start": start_pos,
                 "char_end": actual_end,
-                "code_length": len(object_code),
+                "code_length": actual_end - start_pos,
                 "status": "pending",
                 "parsing_method": method,
                 "validation_status": "valid" if is_valid else "warning"
@@ -402,31 +418,20 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
 
         for i, match in enumerate(matches):
             start_pos = match.start()
-
-            if i < len(matches) - 1:
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content)
+            end_pos = matches[i + 1].start() if i < len(matches) - 1 else len(content)
 
             object_name = extract_object_name(match)
-
             actual_end, method = find_object_end_robust(
                 content, start_pos, end_pos, object_name, object_type
             )
 
             object_code = content[start_pos:actual_end].strip()
-
             is_valid, error_msg = validate_extracted_code(object_code, object_name, object_type)
+
             if not is_valid:
                 log_parsing_error(
-                    f"TRIGGER '{object_name}': {error_msg} (método: {method})",
-                    {
-                        "object_name": object_name,
-                        "object_type": object_type,
-                        "line_start": content[:start_pos].count('\n') + 1,
-                        "method": method,
-                        "validation_error": error_msg
-                    }
+                    f"TRIGGER '{object_name}': {error_msg}",
+                    {"object_name": object_name, "object_type": object_type}
                 )
 
             lines_before = content[:start_pos].count('\n') + 1
@@ -441,87 +446,46 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
                 "line_end": lines_before + lines_in_object - 1,
                 "char_start": start_pos,
                 "char_end": actual_end,
-                "code_length": len(object_code),
+                "code_length": actual_end - start_pos,
                 "status": "pending",
                 "parsing_method": method,
                 "validation_status": "valid" if is_valid else "warning"
             })
 
-    elif object_type == "VIEW":
-        pattern = r'CREATE\s+OR\s+REPLACE\s+(?:FORCE\s+)?VIEW\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
+    elif object_type in ["VIEW", "MVIEW"]:
+        if object_type == "VIEW":
+            pattern = r'CREATE\s+OR\s+REPLACE\s+(?:FORCE\s+)?VIEW\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
+        else:  # MVIEW
+            pattern = r'CREATE\s+MATERIALIZED\s+VIEW\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
+
         matches = list(re.finditer(pattern, content, re.IGNORECASE))
 
         for i, match in enumerate(matches):
             start_pos = match.start()
-
-            if i < len(matches) - 1:
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content)
+            end_pos = matches[i + 1].start() if i < len(matches) - 1 else len(content)
 
             semicolon_search = content[start_pos:end_pos]
             semicolon_match = re.search(r';', semicolon_search)
 
-            if semicolon_match:
-                actual_end = start_pos + semicolon_match.end()
-            else:
-                actual_end = end_pos
-
+            actual_end = start_pos + semicolon_match.end() if semicolon_match else end_pos
             object_name = extract_object_name(match)
             object_code = content[start_pos:actual_end].strip()
 
             lines_before = content[:start_pos].count('\n') + 1
             lines_in_object = object_code.count('\n') + 1
 
+            object_id_prefix = "view" if object_type == "VIEW" else "mview"
+
             objects.append({
-                "object_id": f"view_{i+1:04d}",
+                "object_id": f"{object_id_prefix}_{i+1:04d}",
                 "object_name": object_name,
-                "object_type": "VIEW",
+                "object_type": object_type,
                 "source_file": file_path.name,
                 "line_start": lines_before,
                 "line_end": lines_before + lines_in_object - 1,
                 "char_start": start_pos,
                 "char_end": actual_end,
-                "code_length": len(object_code),
-                "status": "pending"
-            })
-
-    elif object_type == "MVIEW":
-        pattern = r'CREATE\s+MATERIALIZED\s+VIEW\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
-        matches = list(re.finditer(pattern, content, re.IGNORECASE))
-
-        for i, match in enumerate(matches):
-            start_pos = match.start()
-
-            if i < len(matches) - 1:
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content)
-
-            semicolon_search = content[start_pos:end_pos]
-            semicolon_match = re.search(r';', semicolon_search)
-
-            if semicolon_match:
-                actual_end = start_pos + semicolon_match.end()
-            else:
-                actual_end = end_pos
-
-            object_name = extract_object_name(match)
-            object_code = content[start_pos:actual_end].strip()
-
-            lines_before = content[:start_pos].count('\n') + 1
-            lines_in_object = object_code.count('\n') + 1
-
-            objects.append({
-                "object_id": f"mview_{i+1:04d}",
-                "object_name": object_name,
-                "object_type": "MVIEW",
-                "source_file": file_path.name,
-                "line_start": lines_before,
-                "line_end": lines_before + lines_in_object - 1,
-                "char_start": start_pos,
-                "char_end": actual_end,
-                "code_length": len(object_code),
+                "code_length": actual_end - start_pos,
                 "status": "pending"
             })
 
@@ -530,14 +494,7 @@ def parse_sql_file_robust(file_path: Path, object_type: str) -> List[Dict]:
 
 
 def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
-    """
-    Parsea objetos de referencia (DDL, Types, Views) para análisis contextual.
-
-    Estos objetos NO se convierten (ora2pg ya los maneja), pero el agente
-    los necesita como contexto para analizar código PL/SQL que los usa.
-
-    (Mantiene la lógica original de prepare_migration.py para objetos DDL)
-    """
+    """Parsea objetos de referencia (DDL, Types, etc.)."""
     if not file_path.exists():
         return []
 
@@ -548,19 +505,25 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
 
     objects = []
 
-    # Patrones según tipo de objeto (soportan "esquema"."nombre", esquema.nombre, nombre)
+    # Patrones según tipo
     if object_type == "TABLE":
         pattern = r'CREATE\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
     elif object_type == "TYPE":
         pattern = r'CREATE\s+(OR\s+REPLACE\s+)?TYPE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
-    elif object_type == "VIEW":
-        pattern = r'CREATE\s+(OR\s+REPLACE\s+)?VIEW\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
-    elif object_type == "MVIEW":
-        pattern = r'CREATE\s+MATERIALIZED\s+VIEW\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
     elif object_type == "SEQUENCE":
         pattern = r'CREATE\s+SEQUENCE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
     elif object_type == "DIRECTORY":
         pattern = r'CREATE\s+(OR\s+REPLACE\s+)?DIRECTORY\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
+    elif object_type == "PRIMARY_KEY":
+        # Patrón mejorado que maneja saltos de línea entre ALTER TABLE y PRIMARY KEY
+        pattern = r'ALTER\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[\s\S]*?ADD\s+CONSTRAINT\s+\w+[\s\S]*?PRIMARY\s+KEY'
+    elif object_type == "FOREIGN_KEY":
+        # Patrón mejorado que maneja saltos de línea entre ALTER TABLE y FOREIGN KEY
+        pattern = r'ALTER\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[\s\S]*?ADD\s+CONSTRAINT\s+\w+[\s\S]*?FOREIGN\s+KEY'
+    elif object_type == "JOB":
+        # Patrón corregido que captura desde BEGIN hasta el nombre del job
+        # Formato completo: BEGIN + dbms_scheduler.create_job('"JOB_NAME"', ...)
+        pattern = r'BEGIN\s+dbms_scheduler\.create_job\s*\(\s*\'?"([^"]+)"\'?'
     else:
         return []
 
@@ -568,11 +531,7 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
 
     for i, match in enumerate(matches):
         start_pos = match.start()
-
-        if i < len(matches) - 1:
-            end_pos = matches[i + 1].start()
-        else:
-            end_pos = len(content)
+        end_pos = matches[i + 1].start() if i < len(matches) - 1 else len(content)
 
         semicolon_search = content[start_pos:end_pos]
 
@@ -580,15 +539,19 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
             end_match = re.search(r'\)\s*\n\s*/\s*(?=\n|$)', semicolon_search)
             if not end_match:
                 end_match = re.search(r'/\s*(?=\n|$)', semicolon_search)
+        elif object_type == "JOB":
+            # Formato correcto: END; + nueva línea + / (obligatorio)
+            end_match = re.search(r'END;\s*\n\s*/', semicolon_search)
         else:
             end_match = re.search(r';', semicolon_search)
 
-        if end_match:
-            actual_end = start_pos + end_match.end()
-        else:
-            actual_end = end_pos
+        actual_end = start_pos + end_match.end() if end_match else end_pos
 
-        object_name = extract_object_name(match)
+        if object_type == "JOB":
+            # El patrón ya captura solo el nombre sin comillas: "ADD_JOB_NAME"
+            object_name = match.group(1).upper()
+        else:
+            object_name = extract_object_name(match)
         object_code = content[start_pos:actual_end].strip()
 
         lines_before = content[:start_pos].count('\n') + 1
@@ -604,9 +567,9 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
             "line_end": lines_before + lines_in_object - 1,
             "char_start": start_pos,
             "char_end": actual_end,
-            "code_length": len(object_code),
+            "code_length": actual_end - start_pos,  # Calcular desde posiciones, no desde object_code.strip()
             "status": "reference_only",
-            "note": "Convertido por ora2pg - Incluido como contexto de análisis"
+            "note": "Contexto para análisis - Conversión manejada por ora2pg"
         })
 
     print(f"  ✅ Encontrados {len(objects)} objetos de tipo {object_type} (referencia)")
@@ -615,83 +578,166 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
 
 def generate_manifest(dry_run: bool = False) -> Dict:
     """
-    Genera manifest.json con índice completo de todos los objetos (VERSIÓN ROBUSTA v2).
+    Genera manifest.json en ORDEN DE COMPILACIÓN de Oracle.
+
+    Args:
+        dry_run: Si es True, solo valida sin guardar archivos
+
+    ORDEN CORRECTO (v3):
+    1. TYPES          → Tipos base
+    2. SEQUENCES      → Secuencias
+    3. TABLES         → Tablas
+    4. PRIMARY_KEYS   → PKs
+    5. FOREIGN_KEYS   → FKs
+    6. DIRECTORIES    → Directorios (opcional con --skip-directories)
+    7. VIEWS          → Views (REFERENCIA + EJECUTABLE)
+    8. MVIEWS         → MViews (REFERENCIA + EJECUTABLE)
+    9. FUNCTIONS      → Funciones
+    10. PROCEDURES    → Procedures
+    11. PACKAGE_SPEC  → Package specs
+    12. PACKAGE_BODY  → Package bodies
+    13. TRIGGERS      → Triggers
+    14. JOBS          → Jobs (opcional si no existe jobs.sql)
     """
-    print("\n🔍 Generando manifest de objetos (v2 - parsing robusto)...\n")
+    print("\n🔍 Generando manifest (v3 - ORDEN CORRECTO)...\n")
 
-    # ===== OBJETOS EJECUTABLES (PL/SQL a convertir) =====
-    print("📝 Procesando objetos EJECUTABLES (código PL/SQL)...\n")
-    executable_objects = []
+    # ===== PROCESAMIENTO EN ORDEN DE COMPILACIÓN =====
+    print("📝 Procesando objetos en ORDEN DE COMPILACIÓN de Oracle...\n")
 
-    files_to_parse = [
-        (EXTRACTED_DIR / "views.sql", "VIEW"),
-        (EXTRACTED_DIR / "materialized_views.sql", "MVIEW"),
-        (EXTRACTED_DIR / "functions.sql", "FUNCTION"),
-        (EXTRACTED_DIR / "procedures.sql", "PROCEDURE"),
-        (EXTRACTED_DIR / "packages_spec.sql", "PACKAGE_SPEC"),
-        (EXTRACTED_DIR / "packages_body.sql", "PACKAGE_BODY"),
-        (EXTRACTED_DIR / "triggers.sql", "TRIGGER"),
-    ]
+    all_objects = []
 
-    for file_path, object_type in files_to_parse:
-        if file_path.exists():
-            objects = parse_sql_file_robust(file_path, object_type)
-            for obj in objects:
-                obj["category"] = "EXECUTABLE"
-            executable_objects.extend(objects)
-        else:
-            print(f"⚠️  Archivo no encontrado: {file_path}")
+    # 1. TYPES (tipos base)
+    print("1️⃣  TYPES (tipos de datos base)")
+    types = parse_reference_objects(EXTRACTED_DIR / "types.sql", "TYPE")
+    all_objects.extend(types)
 
-    # ===== OBJETOS DE REFERENCIA (DDL para contexto) =====
-    print("\n📚 Procesando objetos de REFERENCIA (contexto)...\n")
-    reference_objects = []
+    # 2. SEQUENCES
+    print("\n2️⃣  SEQUENCES (secuencias)")
+    sequences = parse_reference_objects(EXTRACTED_DIR / "sequences.sql", "SEQUENCE")
+    all_objects.extend(sequences)
 
-    reference_files = [
-        (EXTRACTED_DIR / "types.sql", "TYPE"),
-        (EXTRACTED_DIR / "sequences.sql", "SEQUENCE"),
-        (EXTRACTED_DIR / "tables.sql", "TABLE"),
-        (EXTRACTED_DIR / "primary_keys.sql", "PRIMARY_KEY"),
-        (EXTRACTED_DIR / "foreign_keys.sql", "FOREIGN_KEY"),
-    ]
+    # 3. TABLES
+    print("\n3️⃣  TABLES (tablas)")
+    tables = parse_reference_objects(EXTRACTED_DIR / "tables.sql", "TABLE")
+    all_objects.extend(tables)
 
-    for file_path, object_type in reference_files:
-        objects = parse_reference_objects(file_path, object_type)
-        reference_objects.extend(objects)
+    # 4. PRIMARY KEYS
+    print("\n4️⃣  PRIMARY KEYS")
+    pks = parse_reference_objects(EXTRACTED_DIR / "primary_keys.sql", "PRIMARY_KEY")
+    all_objects.extend(pks)
 
-    # ===== COMBINAR TODOS LOS OBJETOS =====
-    all_objects = reference_objects + executable_objects
+    # 5. FOREIGN KEYS
+    print("\n5️⃣  FOREIGN KEYS")
+    fks = parse_reference_objects(EXTRACTED_DIR / "foreign_keys.sql", "FOREIGN_KEY")
+    all_objects.extend(fks)
 
+    # 6. DIRECTORIES (opcional)
+    print("\n6️⃣  DIRECTORIES (para UTL_FILE - contexto de análisis)")
+    directories = parse_reference_objects(EXTRACTED_DIR / "directories.sql", "DIRECTORY")
+    if directories:
+        for d in directories:
+            d["note"] = "Contexto para UTL_FILE - PostgreSQL no usa DIRECTORIES (migrar a S3)"
+        all_objects.extend(directories)
+
+    # 7. VIEWS (DOBLE PROPÓSITO: Referencia + Ejecutable)
+    print("\n7️⃣  VIEWS (referencia + ejecutable)")
+    views = parse_sql_file_robust(EXTRACTED_DIR / "views.sql", "VIEW")
+    for view in views:
+        view["category"] = "REFERENCE_AND_EXECUTABLE"
+        view["note"] = "Usado como contexto Y requiere análisis de lógica"
+    all_objects.extend(views)
+
+    # 8. MATERIALIZED VIEWS (DOBLE PROPÓSITO)
+    print("\n8️⃣  MATERIALIZED VIEWS (referencia + ejecutable)")
+    mviews = parse_sql_file_robust(EXTRACTED_DIR / "materialized_views.sql", "MVIEW")
+    for mview in mviews:
+        mview["category"] = "REFERENCE_AND_EXECUTABLE"
+        mview["note"] = "Usado como contexto Y requiere análisis de lógica"
+    all_objects.extend(mviews)
+
+    # 9. FUNCTIONS
+    print("\n9️⃣  FUNCTIONS")
+    functions = parse_sql_file_robust(EXTRACTED_DIR / "functions.sql", "FUNCTION")
+    for func in functions:
+        func["category"] = "EXECUTABLE"
+    all_objects.extend(functions)
+
+    # 10. PROCEDURES
+    print("\n🔟 PROCEDURES")
+    procedures = parse_sql_file_robust(EXTRACTED_DIR / "procedures.sql", "PROCEDURE")
+    for proc in procedures:
+        proc["category"] = "EXECUTABLE"
+    all_objects.extend(procedures)
+
+    # 11. PACKAGE SPECS
+    print("\n1️⃣1️⃣  PACKAGE SPECS")
+    pkg_specs = parse_sql_file_robust(EXTRACTED_DIR / "packages_spec.sql", "PACKAGE_SPEC")
+    for spec in pkg_specs:
+        spec["category"] = "EXECUTABLE"
+    all_objects.extend(pkg_specs)
+
+    # 12. PACKAGE BODIES
+    print("\n1️⃣2️⃣  PACKAGE BODIES")
+    pkg_bodies = parse_sql_file_robust(EXTRACTED_DIR / "packages_body.sql", "PACKAGE_BODY")
+    for body in pkg_bodies:
+        body["category"] = "EXECUTABLE"
+    all_objects.extend(pkg_bodies)
+
+    # 13. TRIGGERS
+    print("\n1️⃣3️⃣  TRIGGERS")
+    triggers = parse_sql_file_robust(EXTRACTED_DIR / "triggers.sql", "TRIGGER")
+    for trigger in triggers:
+        trigger["category"] = "EXECUTABLE"
+    all_objects.extend(triggers)
+
+    # 14. JOBS
+    print("\n1️⃣4️⃣  JOBS (programación)")
+    jobs = parse_reference_objects(EXTRACTED_DIR / "jobs.sql", "JOB")
+    all_objects.extend(jobs)
+
+    # Re-numerar object_ids en orden procesado
     for i, obj in enumerate(all_objects, start=1):
         obj["object_id"] = f"obj_{i:04d}"
+        obj["processing_order"] = i
 
-    # Generar estadísticas
-    executable_count = len(executable_objects)
-    reference_count = len(reference_objects)
+    # Estadísticas
+    reference_count = len([o for o in all_objects if o.get("category") == "REFERENCE"])
+    executable_count = len([o for o in all_objects if o.get("category") == "EXECUTABLE"])
+    dual_count = len([o for o in all_objects if o.get("category") == "REFERENCE_AND_EXECUTABLE"])
+    warning_count = len([o for o in all_objects if o.get("validation_status") == "warning"])
 
     objects_by_type = {}
     for obj in all_objects:
         obj_type = obj["object_type"]
         objects_by_type[obj_type] = objects_by_type.get(obj_type, 0) + 1
 
-    # Contar objetos con warnings
-    warning_count = len([obj for obj in all_objects if obj.get("validation_status") == "warning"])
+    # Processing order según configuración
+    processing_order = [
+            "TYPES", "SEQUENCES", "TABLES", "PRIMARY_KEYS", "FOREIGN_KEYS",
+            "DIRECTORIES", "VIEWS", "MVIEWS", "FUNCTIONS", "PROCEDURES",
+            "PACKAGE_SPEC", "PACKAGE_BODY", "TRIGGERS", "JOBS"
+        ]
+       
 
     manifest = {
         "generated_at": datetime.now().isoformat(),
-        "version": "2.0-robust",
+        "version": "3.0-ordered",
         "total_objects": len(all_objects),
-        "executable_count": executable_count,
         "reference_count": reference_count,
+        "executable_count": executable_count,
+        "dual_purpose_count": dual_count,
         "warning_count": warning_count,
         "objects_by_category": {
+            "REFERENCE": reference_count,
             "EXECUTABLE": executable_count,
-            "REFERENCE": reference_count
+            "REFERENCE_AND_EXECUTABLE": dual_count
         },
         "objects_by_type": objects_by_type,
-        "note": "REFERENCE objects son convertidos por ora2pg - Se incluyen solo como contexto para análisis",
+        "processing_order": processing_order,
+        "note": "Objetos ordenados según compilación de Oracle para análisis óptimo",
         "parsing_info": {
             "total_errors": len(parsing_errors),
-            "error_summary": f"{warning_count} objetos con warnings de validación"
+            "error_summary": f"{warning_count} objetos con warnings"
         },
         "objects": all_objects
     }
@@ -700,28 +746,27 @@ def generate_manifest(dry_run: bool = False) -> Dict:
         with open(MANIFEST_FILE, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-        # Guardar log de errores si hay
         if parsing_errors:
             with open(VALIDATION_LOG, 'w', encoding='utf-8') as f:
                 json.dump(parsing_errors, f, indent=2, ensure_ascii=False)
-            print(f"\n⚠️  Log de parsing guardado: {VALIDATION_LOG}")
+            print(f"\n⚠️  Log de parsing: {VALIDATION_LOG}")
 
     print(f"\n{'='*80}")
-    print(f"📊 RESUMEN DE PARSING (v2):")
+    print(f"📊 RESUMEN (v3 - ORDEN CORRECTO):")
     print(f"{'='*80}")
     print(f"   Total objetos: {manifest['total_objects']}")
-    print(f"   Ejecutables: {executable_count}")
     print(f"   Referencia: {reference_count}")
+    print(f"   Ejecutables: {executable_count}")
+    print(f"   Dual (ref + exec): {dual_count}")
     print(f"   Warnings: {warning_count}")
-    print(f"   Errores de parsing: {len(parsing_errors)}")
 
-    if warning_count > 0:
-        print(f"\n⚠️  {warning_count} objetos tienen warnings de validación")
-        print(f"   Revisar {VALIDATION_LOG} para detalles")
+    if dual_count > 0:
+        print(f"\n📌 {dual_count} objetos VIEWS/MVIEWS tienen doble propósito:")
+        print(f"   - Se usan como CONTEXTO (referencia)")
+        print(f"   - Requieren ANÁLISIS de lógica (ejecutables)")
 
     if dry_run:
         print(f"\n🔍 MODO DRY-RUN - Manifest NO guardado")
-        print(f"   Ejecutar sin --dry-run para generar manifest.json")
     else:
         print(f"\n✅ Manifest generado: {MANIFEST_FILE}")
 
@@ -729,7 +774,7 @@ def generate_manifest(dry_run: bool = False) -> Dict:
 
 
 def create_directory_structure():
-    """Crea estructura de directorios necesaria para la migración."""
+    """Crea estructura de directorios."""
     print("\n📁 Creando estructura de directorios...\n")
 
     directories = [
@@ -759,23 +804,20 @@ def create_directory_structure():
     if created_count > 0:
         print(f"  ✅ Creados {created_count} directorios nuevos")
     else:
-        print(f"  ✅ Estructura de directorios ya existe")
+        print(f"  ✅ Estructura ya existe")
 
 
 def initialize_progress(manifest: Dict, force: bool = False) -> Dict:
-    """Inicializa archivo progress.json para tracking."""
-    print("\n📊 Inicializando tracking de progreso...\n")
+    """Inicializa progress.json."""
+    print("\n📊 Inicializando progreso...\n")
 
     if PROGRESS_FILE.exists() and not force:
         print(f"⚠️  Ya existe {PROGRESS_FILE}")
         with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
             existing_progress = json.load(f)
 
-        print(f"   Progreso actual:")
-        print(f"   - Procesados: {existing_progress['processed_count']}/{existing_progress['total_objects']}")
-        print(f"   - Último batch: {existing_progress['current_batch']}")
-        print(f"   - Último objeto: {existing_progress['last_object_processed']}")
-        print("   Manteniendo progreso existente (usa --force para resetear)")
+        print(f"   Progreso: {existing_progress['processed_count']}/{existing_progress['total_objects']}")
+        print(f"   Batch: {existing_progress['current_batch']}")
         return existing_progress
 
     progress = {
@@ -805,32 +847,27 @@ def main():
     dry_run = '--dry-run' in sys.argv
 
     print("="*80)
-    print("PREPARACIÓN MIGRACIÓN ORACLE → POSTGRESQL (v2 - PARSING ROBUSTO)")
+    print("PREPARACIÓN MIGRACIÓN ORACLE → POSTGRESQL (v3 - ORDEN CORRECTO)")
     print("="*80)
 
     if not EXTRACTED_DIR.exists():
-        print(f"❌ Error: Directorio {EXTRACTED_DIR} no existe")
-        print(f"   Ejecuta primero el script de extracción de Oracle")
+        print(f"\n❌ Error: {EXTRACTED_DIR} no existe")
         return
 
     create_directory_structure()
-
     manifest = generate_manifest(dry_run=dry_run)
 
     if not dry_run:
-        progress = initialize_progress(manifest, force=force)
+        initialize_progress(manifest, force=force)
 
     print("\n" + "="*80)
-    print("✅ PREPARACIÓN COMPLETADA (v2)")
+    print("✅ PREPARACIÓN COMPLETADA (v3)")
     print("="*80)
 
     if dry_run:
-        print("\n🔍 MODO DRY-RUN:")
-        print("   - Parsing validado exitosamente")
-        print("   - Manifest NO guardado")
-        print("   - Ejecutar sin --dry-run para generar archivos")
+        print("\n🔍 DRY-RUN: Parsing validado, manifest NO guardado")
     else:
-        print("\nArchivos generados:")
+        print(f"\nArchivos generados:")
         print(f"  - {MANIFEST_FILE}")
         print(f"  - {PROGRESS_FILE}")
         if parsing_errors:

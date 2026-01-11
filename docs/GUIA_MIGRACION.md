@@ -343,7 +343,7 @@ shadow_tests/
 
 **Propósito:** Índice completo de todos los objetos con posiciones exactas
 
-**Generado por:** `scripts/prepare_migration_v2.py`
+**Generado por:** `scripts/prepare_migration.py`
 
 **Estructura:**
 ```json
@@ -493,7 +493,7 @@ Día 3 (Sesión 5 - 5h):
 
 ```bash
 # 1. Generar manifest y progress
-python scripts/prepare_migration_v2.py
+python scripts/prepare_migration.py
 
 # 2. Validar parsing
 python scripts/validate_parsing.py

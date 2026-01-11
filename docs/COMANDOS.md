@@ -23,40 +23,45 @@
 
 ```
 scripts/
-├── prepare_migration_v2.py    ← Genera manifest.json y progress.json
-├── validate_parsing.py         ← Valida extracción de objetos
-└── update_progress.py          ← Actualiza progreso de migración
+├── prepare_migration.py          ← Genera manifest.json y progress.json
+├── validate_manifest.py              ← Valida patrones regex de parsing END + /
+├── validate_package_spec_count.py    ← Valida conteo PACKAGE_SPEC con AUTHID
+└── update_progress.py                ← Actualiza progreso de migración
 ```
 
 ### Archivos Archivados (No usar)
 
 ```
-archived/
+archived/scripts/
 ├── prepare_migration_v3_improved.py  ← Demo incompleta
-└── test_parsing_v2.py               ← Test obsoleto
+├── test_parsing_v2.py               ← Test obsoleto
+├── validate_parsing.py              ← Consolidado en validate_manifest.py
+└── validate_manifest_order.py       ← Consolidado en validate_manifest.py
 ```
+
+**Nota:** Los scripts `validate_parsing.py` y `validate_manifest_order.py` fueron consolidados en un solo archivo `validate_manifest.py` que ejecuta ambas validaciones.
 
 ---
 
 ## 🚀 Comandos de Preparación
 
-### 1. prepare_migration_v2.py
+### 1. prepare_migration.py
 
 **Propósito:** Genera manifest.json con índice de 5,775 objetos PL/SQL
 
-**Ubicación:** `scripts/prepare_migration_v2.py`
+**Ubicación:** `scripts/prepare_migration.py`
 
 #### Opciones de Ejecución
 
 ```bash
 # Modo dry-run (solo valida, NO genera archivos)
-python scripts/prepare_migration_v2.py --dry-run
+python scripts/prepare_migration.py --dry-run
 
 # Modo producción (genera manifest.json y progress.json)
-python scripts/prepare_migration_v2.py
+python scripts/prepare_migration.py
 
 # Con --force (regenera progress.json desde cero)
-python scripts/prepare_migration_v2.py --force
+python scripts/prepare_migration.py --force
 ```
 
 #### Outputs Generados
@@ -127,30 +132,41 @@ Total objetos: 5,775
 
 ## ✅ Comandos de Validación
 
-### 2. validate_parsing.py
+### 2. validate_manifest.py
 
-**Propósito:** Valida que todos los objetos fueron extraídos correctamente
+**Propósito:** Validación completa de manifest.json (parsing técnico + orden de compilación Oracle)
 
-**Ubicación:** `scripts/validate_parsing.py`
+**Ubicación:** `scripts/validate_manifest.py`
+
+**Validaciones incluidas:**
+1. **Parsing Técnico**: Límites, delimitadores, código extraído
+2. **Orden de Compilación**: Dependencias Oracle (TYPE → SEQUENCE → ... → JOB)
+3. **Metadata**: Campos `processing_order` y `category`
 
 #### Opciones de Ejecución
 
 ```bash
-# Validación completa de todos los objetos
-python scripts/validate_parsing.py
+# Validación completa (parsing + orden)
+python scripts/validate_manifest.py
+
+# Solo parsing técnico
+python scripts/validate_manifest.py --parsing-only
+
+# Solo orden de compilación
+python scripts/validate_manifest.py --order-only
 
 # Validar solo un tipo de objeto
-python scripts/validate_parsing.py --type TRIGGER
-python scripts/validate_parsing.py --type FUNCTION
-python scripts/validate_parsing.py --type PACKAGE_BODY
-python scripts/validate_parsing.py --type PROCEDURE
+python scripts/validate_manifest.py --type TRIGGER
+python scripts/validate_manifest.py --type FUNCTION
+python scripts/validate_manifest.py --type PACKAGE_BODY
+python scripts/validate_manifest.py --type PROCEDURE
 
 # Modo verbose (más detalles)
-python scripts/validate_parsing.py --verbose
+python scripts/validate_manifest.py --verbose
 
 # Ver muestra aleatoria de N objetos
-python scripts/validate_parsing.py --sample 10
-python scripts/validate_parsing.py --sample 20
+python scripts/validate_manifest.py --sample 10
+python scripts/validate_manifest.py --sample 20
 ```
 
 #### Exit Codes
@@ -160,22 +176,45 @@ python scripts/validate_parsing.py --sample 20
 
 #### Validaciones Realizadas
 
-1. **Límites coherentes**: line_start < line_end, char_start < char_end
-2. **Delimitadores correctos**:
-   - PL/SQL debe terminar con `/`
-   - DDL debe terminar con `;`
-3. **Inicio correcto**: Debe empezar con `CREATE`
-4. **Code_length**: Debe coincidir con char_end - char_start
+**1. Parsing Técnico:**
+- Límites coherentes (line_start < line_end, char_start < char_end)
+- Delimitadores correctos (PL/SQL termina con `/`, DDL termina con `;`)
+- Inicio correcto (debe empezar con `CREATE`)
+- code_length correcto (char_end - char_start)
+
+**2. Orden de Compilación Oracle:**
+- Objetos ordenados según dependencias (TYPE → SEQUENCE → TABLE → PKs → FKs → VIEW → MVIEW → FUNCTION → PROCEDURE → PACKAGE_SPEC → PACKAGE_BODY → TRIGGER → JOB)
+- Campo `processing_order` consecutivo (1, 2, 3, ...)
+- Campo `category` presente en todos los objetos
+- Categorías especiales (VIEWS/MVIEWS con `REFERENCE_AND_EXECUTABLE`)
 
 #### Resultados Esperados (v2.1)
 
 ```
-📊 Total objetos validados: 5,775
-✅ Objetos sin problemas: 2,733
-⚠️  Objetos con warnings: 1,518
-❌ Objetos con errores: 1,524
+================================================================================
+📋 REPORTE DE PARSING TÉCNICO
+================================================================================
+📊 Total objetos: 5,775
+✅ Sin problemas: 2,733
+⚠️  Con warnings: 1,518
+❌ Con errores: 1,524
+   Tasa éxito: 73.6%
 
-Nota: Los errores están en objetos REFERENCE (TYPE, TABLE)
+================================================================================
+🔄 REPORTE DE ORDEN DE COMPILACIÓN
+================================================================================
+📊 Total objetos: 5,775
+✅ Orden de compilación correcto
+✅ Campo 'processing_order' presente en todos los objetos
+✅ Campo 'processing_order' es consecutivo (1, 2, 3, ...)
+✅ Campo 'category' presente en todos los objetos
+
+================================================================================
+📊 RESUMEN FINAL
+================================================================================
+✅ APROBADO: Manifest válido - Listo para usar con agentes
+
+Nota: Los errores de parsing están en objetos REFERENCE (TYPE, TABLE)
       que son solo contexto y no se convierten con Claude.
       Los objetos EJECUTABLES tienen solo 19 warnings (1.1%)
 ```
@@ -280,21 +319,21 @@ pwd
 ls -lh sql/extracted/*.sql
 
 # 3. Verificar que los scripts existen
-ls -lh scripts/prepare_migration_v2.py
-ls -lh scripts/validate_parsing.py
+ls -lh scripts/prepare_migration.py
+ls -lh scripts/validate_manifest.py
 ```
 
 ### Flujo Estándar
 
 ```bash
 # PASO 1: Ejecutar en modo dry-run primero
-python scripts/prepare_migration_v2.py --dry-run
+python scripts/prepare_migration.py --dry-run
 
 # PASO 2: Si todo OK, generar manifest
-python scripts/prepare_migration_v2.py
+python scripts/prepare_migration.py
 
-# PASO 3: Validar extracción
-python scripts/validate_parsing.py
+# PASO 3: Validar manifest completo (parsing + orden)
+python scripts/validate_manifest.py
 
 # PASO 4: Ver resumen
 ls -lh sql/extracted/*.json
@@ -322,10 +361,10 @@ rm -f sql/extracted/progress.json
 rm -f sql/extracted/parsing_validation.log
 
 # 2. Generar desde cero
-python scripts/prepare_migration_v2.py --force
+python scripts/prepare_migration.py --force
 
-# 3. Validar
-python scripts/validate_parsing.py
+# 3. Validar (parsing + orden)
+python scripts/validate_manifest.py
 ```
 
 ---
@@ -409,11 +448,13 @@ EOF
 
 ---
 
-### Problema: validate_parsing.py falla con exit code 1
+### Problema: validate_manifest.py falla con exit code 1
 
 **Síntomas:**
 ```
-❌ NO APROBADO: 1544 errores críticos encontrados
+❌ NO APROBADO
+   - 1544 errores de parsing
+   - 0 errores de orden de compilación
 ```
 
 **Análisis:**
@@ -468,6 +509,151 @@ EOF
 trigger_end_with_slash: 17  ← Correcto
 exact_name_semicolon: 70     ← Correcto
 fallback_end_pos: 0          ← Si > 0, hay problema
+```
+
+---
+
+### Problema: Patrón PACKAGE_SPEC pierde 8 objetos con AUTHID CURRENT_USER
+
+**Síntomas:**
+```bash
+# Conteo manual del archivo fuente
+grep -c "CREATE OR REPLACE PACKAGE" sql/extracted/packages_spec.sql
+# 589 paquetes
+
+# Conteo en manifest.json
+cat sql/extracted/manifest.json | jq '.objects_by_type.PACKAGE_SPEC'
+# 581 paquetes (antes de la corrección)
+
+# Diferencia: 8 paquetes perdidos
+```
+
+**Causa:**
+El patrón regex original no contemplaba cláusulas adicionales como `AUTHID CURRENT_USER` entre el nombre del paquete y el `IS/AS`.
+
+**Ejemplo de código problemático:**
+```sql
+-- Paquetes con AUTHID que se perdían
+CREATE OR REPLACE PACKAGE "LATINO_PLSQL"."RHH_K_CARGA_CONCEPTOS" AUTHID CURRENT_USER IS
+CREATE OR REPLACE PACKAGE "LATINO_PLSQL"."RHH_K_NOMINA" AUTHID CURRENT_USER IS
+CREATE OR REPLACE PACKAGE "LATINO_PLSQL"."RHH_K_VACACIONES" AUTHID CURRENT_USER IS
+```
+
+**Paquetes perdidos (8 total):**
+- RHH_K_CARGA_CONCEPTOS
+- RHH_K_MOVIMIENTO_PERSONAL
+- RHH_K_MULTAS
+- RHH_K_NOMINA
+- RHH_K_PROCESO
+- RHH_K_TRX
+- RHH_K_UTILIDADES
+- RHH_K_VACACIONES
+
+**Solución:**
+Actualizado en v2.1 con patrón que permite contenido en la misma línea antes de IS/AS.
+
+**Patrón mejorado:**
+```python
+# Antes (v2.0):
+pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))\s+(IS|AS)'
+
+# Después (v2.1):
+pattern = r'CREATE\s+OR\s+REPLACE\s+PACKAGE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[^\n]*?\s+(IS|AS)'
+#                                                                               ^^^^^^^^
+#                                                                   Permite AUTHID, ACCESSIBLE BY, etc.
+```
+
+**Verificar la corrección:**
+```bash
+# Script de validación específico
+python scripts/validate_package_spec_count.py
+
+# Debe mostrar:
+# ✅ VALIDACIÓN EXITOSA
+#    - 589 PACKAGE_SPEC detectados correctamente
+#    - 8 paquetes RHH_K_* con AUTHID presentes
+
+# Verificar manifest actualizado
+cat sql/extracted/manifest.json | jq '.objects_by_type.PACKAGE_SPEC'
+# Debe mostrar: 589
+```
+
+**Resultado esperado (v2.1):**
+```
+📊 RESUMEN (v3 - ORDEN CORRECTO):
+   Total objetos: 11230  ← Antes: 11222 (+8 objetos recuperados)
+   PACKAGE_SPEC: 589     ← Antes: 581 (+8 objetos)
+
+✅ PREPARACIÓN COMPLETADA
+```
+
+---
+
+### Problema: Parsing falla con "No se encontró END exacto" para PACKAGE_BODY/PACKAGE_SPEC
+
+**Síntomas:**
+```
+⚠️  No se encontró END exacto para PACKAGE_BODY 'VHC_CONTROL_ORDENES_X_FECHA'
+⚠️  PACKAGE_BODY 'VHC_CONTROL_ORDENES_X_FECHA': No termina con END VHC_CONTROL_ORDENES_X_FECHA; / o END; / (método: fallback_end_pos)
+```
+
+**Causa:**
+El patrón regex original no contemplaba comentarios inline o múltiples líneas en blanco entre el `END` y el delimitador `/`.
+
+**Ejemplos de código problemático:**
+
+```sql
+-- Caso 1: Comentario inline en la misma línea del END
+END VHC_CONTROL_ORDENES_X_FECHA;--END PACKAGE BODY
+/
+
+-- Caso 2: Múltiples líneas en blanco y comentarios
+END SCI_K_VALIDA;
+
+
+--grant execute on sci_k_valida to public;
+--/
+--create public synonym sci_k_valida for solca_plsql.sci_k_valida;
+/
+```
+
+**Solución:**
+Actualizado en v2.1 con patrón mejorado que permite:
+- Comentarios inline después del `;` (ej: `--END PACKAGE BODY`)
+- Múltiples líneas en blanco antes del `/`
+- Comentarios en líneas intermedias
+
+**Patrón mejorado:**
+```python
+# Antes (v2.0):
+pattern = rf'END\s+{object_name}\s*;\s*\n\s*/'
+
+# Después (v2.1):
+pattern = rf'END\s+{object_name}\s*;(?:--[^\n]*)?(?:[\s]|--[^\n]*\n)*/'
+```
+
+**Verificar la corrección:**
+```bash
+# Script de validación del patrón
+python scripts/validate_manifest.py
+
+# Debe mostrar:
+# Patrón MEJORADO: 6/6 tests pasados (100.0%)
+# ✅ TODOS LOS TESTS PASARON CON EL PATRÓN MEJORADO
+
+# Ejecutar dry-run sin errores de END
+python scripts/prepare_migration.py --dry-run 2>&1 | grep "No se encontró END exacto"
+
+# No debe mostrar resultados (o solo errores legítimos)
+```
+
+**Resultado esperado (v2.1):**
+```
+📊 RESUMEN (v3 - ORDEN CORRECTO):
+   Total objetos: 11222
+   Warnings: 1  ← Solo 1 warning (GEN_P_CREATE_TRIGGER_AUDIT con múltiples CREATE)
+
+✅ PREPARACIÓN COMPLETADA
 ```
 
 ---
@@ -530,5 +716,6 @@ cat sql/extracted/parsing_validation.log | python -c "import sys,json; print(len
 ---
 
 **Última Actualización:** 2026-01-10
-**Versión del Script:** prepare_migration_v2.py v2.1
+**Versión del Script:** prepare_migration.py v2.1
+**Cambios Recientes:** Consolidación de `validate_parsing.py` y `validate_manifest_order.py` en `validate_manifest.py`
 **Autor:** Claude Sonnet 4.5

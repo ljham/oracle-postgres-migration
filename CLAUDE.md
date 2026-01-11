@@ -353,7 +353,7 @@ Ver `archived/README.md` para detalles completos.
 4. **Arquitectura técnica:** Ver [docs/DESARROLLO.md](docs/DESARROLLO.md) para decisiones de diseño
 5. **Verificar progreso:** Leer `sql/extracted/progress.json` si existe en el directorio actual
 6. **Determinar siguiente acción:**
-   - Si progress.json no existe → Guiar al usuario a ejecutar `prepare_migration_v2.py`
+   - Si progress.json no existe → Guiar al usuario a ejecutar `prepare_migration.py`
    - Si processed_count = 0 → Sugerir iniciar Fase 1
    - Si processed_count > 0 → Mostrar progreso actual y preguntar si continuar
 

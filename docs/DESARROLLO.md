@@ -206,7 +206,7 @@ Problemas:
 
 **Propósito:** Extraer objetos PL/SQL individuales de archivos SQL grandes
 
-**Script:** `scripts/prepare_migration_v2.py` (v2.1)
+**Script:** `scripts/prepare_migration.py` (v2.1)
 
 **Input:** Archivos SQL monolíticos (ej: `packages_body.sql` - 71MB)
 
@@ -471,7 +471,7 @@ REFERENCIA: 4,049 objetos
    ↓
    sql/extracted/*.sql
 
-2. PARSING (prepare_migration_v2.py)
+2. PARSING (prepare_migration.py)
    ↓
    sql/extracted/manifest.json
 
@@ -555,7 +555,7 @@ los 100 objetos más consultados."
 
 **Ejemplo:** Agregar soporte para SYNONYM
 
-#### 1. Editar prepare_migration_v2.py
+#### 1. Editar prepare_migration.py
 
 ```python
 # Agregar nuevo tipo de objeto
