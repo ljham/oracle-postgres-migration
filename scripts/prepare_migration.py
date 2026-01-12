@@ -515,11 +515,13 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
     elif object_type == "DIRECTORY":
         pattern = r'CREATE\s+(OR\s+REPLACE\s+)?DIRECTORY\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))'
     elif object_type == "PRIMARY_KEY":
-        # Patrón mejorado que maneja saltos de línea entre ALTER TABLE y PRIMARY KEY
-        pattern = r'ALTER\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[\s\S]*?ADD\s+CONSTRAINT\s+\w+[\s\S]*?PRIMARY\s+KEY'
+        # Patrón mejorado que captura tabla (grupos 1-3) Y constraint name completo (grupo 4)
+        # Incluye caracteres especiales como $ en constraint names (ej: ADD_APER_CIER$P1)
+        pattern = r'ALTER\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[\s\S]*?ADD\s+CONSTRAINT\s+([\w$]+)[\s\S]*?PRIMARY\s+KEY'
     elif object_type == "FOREIGN_KEY":
-        # Patrón mejorado que maneja saltos de línea entre ALTER TABLE y FOREIGN KEY
-        pattern = r'ALTER\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[\s\S]*?ADD\s+CONSTRAINT\s+\w+[\s\S]*?FOREIGN\s+KEY'
+        # Patrón mejorado que captura tabla (grupos 1-3) Y constraint name completo (grupo 4)
+        # Incluye caracteres especiales como $ en constraint names (ej: ADD_ARC_PRO$F1)
+        pattern = r'ALTER\s+TABLE\s+(?:"?(\w+)"?\.\"?(\w+)\"?|(\w+))[\s\S]*?ADD\s+CONSTRAINT\s+([\w$]+)[\s\S]*?FOREIGN\s+KEY'
     elif object_type == "JOB":
         # Patrón corregido que captura desde BEGIN hasta el nombre del job
         # Formato completo: BEGIN + dbms_scheduler.create_job('"JOB_NAME"', ...)
@@ -547,17 +549,28 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
 
         actual_end = start_pos + end_match.end() if end_match else end_pos
 
+        # Extraer nombre del objeto según tipo
         if object_type == "JOB":
             # El patrón ya captura solo el nombre sin comillas: "ADD_JOB_NAME"
             object_name = match.group(1).upper()
+            table_name = None
+        elif object_type in ("PRIMARY_KEY", "FOREIGN_KEY"):
+            # Para constraints: nombre del objeto = constraint name, NO tabla
+            # Grupo 4 = constraint name (último grupo capturado)
+            constraint_name = match.group(4)
+            table_name = extract_object_name(match)  # Tabla (grupos 1-3)
+            object_name = constraint_name.upper()
         else:
             object_name = extract_object_name(match)
+            table_name = None
+
         object_code = content[start_pos:actual_end].strip()
 
         lines_before = content[:start_pos].count('\n') + 1
         lines_in_object = object_code.count('\n') + 1
 
-        objects.append({
+        # Construir objeto base
+        obj = {
             "object_id": f"{object_type.lower()}_{i+1:04d}",
             "object_name": object_name,
             "object_type": object_type,
@@ -570,7 +583,13 @@ def parse_reference_objects(file_path: Path, object_type: str) -> List[Dict]:
             "code_length": actual_end - start_pos,  # Calcular desde posiciones, no desde object_code.strip()
             "status": "reference_only",
             "note": "Contexto para análisis - Conversión manejada por ora2pg"
-        })
+        }
+
+        # Agregar tabla propietaria para constraints (FK/PK)
+        if table_name is not None:
+            obj["table_name"] = table_name
+
+        objects.append(obj)
 
     print(f"  ✅ Encontrados {len(objects)} objetos de tipo {object_type} (referencia)")
     return objects
