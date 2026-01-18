@@ -423,8 +423,8 @@ manifest = Read("sql/extracted/manifest.json")
 ```
 
 El manifest contiene cada objeto con:
-- `object_id`: ID único (ej: "obj_0001", "obj_0002")
-- `object_name`: Nombre del objeto (ej: "VALIDAR_EMAIL", "PKG_VENTAS")
+- `object_id`: ID único (ej: "obj_0001", "obj_0002", "obj_10425")
+- `object_name`: Nombre del objeto (ej: "VALIDAR_EMAIL", "PKG_VENTAS.CALCULAR_TOTAL")
 - `object_type`: Tipo (FUNCTION, PROCEDURE, PACKAGE_SPEC, PACKAGE_BODY, TRIGGER)
 - `source_file`: Archivo donde está (ej: "functions.sql", "packages_body.sql")
 - `line_start`: Línea inicial del objeto en el archivo
@@ -432,6 +432,81 @@ El manifest contiene cada objeto con:
 - `char_start`: Posición de carácter inicial
 - `char_end`: Posición de carácter final
 - `status`: Estado ("pending" o "processed")
+
+**NUEVO EN v4.0 - Objetos Granulares de Packages:**
+- `parent_package`: Nombre del package contenedor (si aplica)
+- `parent_package_id`: ID del package contenedor (ej: "obj_10000")
+- `package_context_file`: Ruta al archivo de contexto del package
+- `internal_to_package`: true si es procedure/function interno
+- `procedure_index`: Posición dentro del package (1, 2, 3...)
+- `total_in_package`: Total de procedures/functions en el package
+
+**Ejemplo de objeto granular:**
+```json
+{
+  "object_id": "obj_10425",
+  "object_name": "ADD_K_ACT_FECHA_RECEPCION.P_OBT_PREST_PERFIL_ORDEN",
+  "object_type": "PROCEDURE",
+  "parent_package": "ADD_K_ACT_FECHA_RECEPCION",
+  "parent_package_id": "obj_10000",
+  "line_start": 12,
+  "line_end": 121,
+  "internal_to_package": true,
+  "procedure_index": 1,
+  "total_in_package": 5
+}
+```
+
+### Paso 1.5: Detectar y Cargar Contexto de Package (NUEVO v4.0)
+
+**IMPORTANTE:** Si el objeto tiene `parent_package`, DEBES leer el contexto del package antes de analizarlo.
+
+```python
+# Detectar si es objeto interno de un package
+if "parent_package" in obj and obj.get("internal_to_package"):
+    # Cargar contexto del package
+    package_id = obj["parent_package_id"]
+    context_file = f"knowledge/packages/{package_id}_context.json"
+    package_context = Read(context_file)
+
+    # El contexto contiene:
+    # - package_variables: Variables declaradas a nivel de package
+    # - package_constants: Constantes del package
+    # - package_types: Tipos definidos en el package
+    # - total_procedures: Total de procedures en el package
+    # - total_functions: Total de functions en el package
+```
+
+**¿Por qué necesitas el contexto del package?**
+
+1. **Variables de Package:** El procedure/function puede usar variables declaradas en el package
+2. **Tipos Personalizados:** El package puede definir tipos que usa el procedure
+3. **Dependencias Internas:** Entender qué otros procedures del mismo package llama
+4. **Análisis de Complejidad:** Un procedure que usa package state es COMPLEX
+
+**Ejemplo de uso:**
+```python
+# Objeto a analizar
+procedure_code = """
+PROCEDURE P_ACTUALIZAR_CACHE IS
+BEGIN
+  g_cache_timestamp := SYSDATE;  -- Variable de package
+  g_cache_data := calcular_datos();
+END;
+"""
+
+# Contexto del package
+package_context = {
+  "package_variables": [
+    {"name": "g_cache_timestamp", "type": "DATE"},
+    {"name": "g_cache_data", "type": "VARCHAR2"}
+  ]
+}
+
+# Análisis correcto
+classification = "COMPLEX"  # Usa package state (variables globales)
+reasoning = "Procedure modifica variables de package (g_cache_timestamp, g_cache_data). Package state no existe en PostgreSQL - requiere refactorización."
+```
 
 ### Paso 2: Filtrar Objetos Asignados
 
