@@ -1,129 +1,133 @@
 ---
 name: migrate-convert
-description: Convertir objetos PL/SQL complejos a PostgreSQL usando estrategias arquitectónicas
+description: Convertir objetos PL/SQL (SIMPLE o COMPLEX) a PostgreSQL usando plsql-converter
 arguments:
   - name: batch
     description: "Número de batch a procesar (ej: 001, 002, ...) o 'next' para siguiente pendiente"
     required: false
     default: "next"
   - name: count
-    description: "Cantidad de objetos complejos a procesar en paralelo (default: 200)"
+    description: "Cantidad de objetos a procesar en paralelo (default: 200 = 20 agentes × 10 objetos)"
     required: false
     default: "200"
-  - name: strategy
-    description: "Filtrar por estrategia específica (opcional): AUTONOMOUS_TRANSACTION, UTL_HTTP, UTL_FILE, DBMS_SQL, etc."
+  - name: complexity
+    description: "Tipo de objetos: 'simple' o 'complex' (default: simple)"
     required: false
+    default: "simple"
 ---
 
 # Comando: /migrate-convert
 
-Ejecuta la **Fase 2B: Conversión de Objetos Complejos** usando estrategias arquitectónicas.
+Ejecuta la **Fase 2: Conversión de Objetos PL/SQL a PostgreSQL** usando procesamiento paralelo con 20 sub-agentes.
 
 ## Uso
 
 ```bash
-/migrate-convert                           # Procesa siguiente batch de objetos complejos
-/migrate-convert 001                       # Procesa batch específico
-/migrate-convert next 100                  # Procesa 100 objetos del siguiente batch
-/migrate-convert next 50 UTL_HTTP          # Procesa solo objetos con estrategia UTL_HTTP
+/migrate-convert                           # Procesa siguiente batch de objetos SIMPLE (200 objetos)
+/migrate-convert 002                       # Procesa batch_002 específico
+/migrate-convert next 100 simple           # Procesa 100 objetos SIMPLE del siguiente batch
+/migrate-convert next 200 complex          # Procesa objetos COMPLEX
 ```
 
 ## Pre-requisitos
 
-- ✅ **Fase 1 completada** (análisis y clasificación)
-- ✅ **Fase 2A ejecutada** (ora2pg para objetos SIMPLE)
-- ✅ Archivo `classification/complex_objects.txt` debe existir
+- ✅ **Fase 1 completada** (análisis y clasificación con /migrate-analyze)
+- ✅ Archivo `classification/simple_objects.txt` o `complex_objects.txt` debe existir según complexity
 
 ## Lo que hace este comando
 
-1. **Lee objetos complejos** de `classification/complex_objects.txt`
-2. **Filtra por estrategia** (si se especifica)
-3. **Invoca el agente plsql-converter** con contexto arquitectónico
-4. **Genera código PostgreSQL** con estrategias específicas para cada patrón
+1. **Lee objetos** de `classification/simple_objects.txt` o `complex_objects.txt`
+2. **Divide en 20 sub-agentes paralelos** (cada uno procesa 10 objetos)
+3. **Invoca el agente plsql-converter** para cada sub-lote
+4. **Genera código PostgreSQL** con sintaxis correcta y minimalista
+5. **Crea script de compilación consolidado** para el batch completo
 
-## Estrategias Soportadas
+## Características clave
 
-- `AUTONOMOUS_TRANSACTION` → Usar `dblink` o reestructurar lógica
-- `UTL_HTTP` → Reemplazar con AWS Lambda + API Gateway
-- `UTL_FILE` → Reemplazar con S3 + presigned URLs
-- `DBMS_SQL` → Convertir a SQL dinámico de PostgreSQL
-- `DBMS_JOB` → Migrar a `pg_cron`
-- `DBMS_OUTPUT` → Reemplazar con `RAISE NOTICE`
-- `CUSTOM_TYPES` → Convertir a tipos compuestos de PostgreSQL
+- **Procesamiento paralelo**: 20 sub-agentes simultáneos para máxima eficiencia
+- **Filosofía minimalista**: Solo genera archivos SQL + 1 script de compilación
+- **Sintaxis PostgreSQL correcta**: Sin comillas, minúsculas, sin (+), sin WITH READ ONLY
+- **Aplicación automática de reglas**: El agente plsql-converter tiene reglas incorporadas
 
 ## Estructura de salida
 
 ```
-migrated/
-├── complex/
-│   ├── batch_001_obj_050.sql      # Código convertido
-│   ├── batch_001_obj_051.sql
-│   └── ...
-└── conversion_log/
-    ├── batch_001_obj_050.md       # Log de decisiones
-    └── ...
+sql/migrated/
+├── simple/                              # Para objetos SIMPLE
+│   ├── views/
+│   │   ├── obj_9346_COM_V_CONVENIOS.sql
+│   │   └── ...
+│   ├── functions/
+│   └── compile_batch_XXX.sql           # Script consolidado
+└── complex/                             # Para objetos COMPLEX
+    ├── packages/
+    ├── procedures/
+    └── compile_batch_XXX.sql
 ```
 
 ---
 
 **PROMPT DE EJECUCIÓN:**
 
-Voy a ejecutar la **Fase 2B: Conversión de Objetos Complejos** usando el agente `plsql-converter`.
+Voy a ejecutar la **Fase 2: Conversión de Objetos PL/SQL a PostgreSQL** usando el agente `plsql-converter` con procesamiento paralelo.
 
 **Configuración:**
 - Batch: {{batch}}
-- Objetos en paralelo: {{count}}
-{{#if strategy}}
-- Estrategia filtrada: {{strategy}}
-{{/if}}
+- Objetos a procesar: {{count}}
+- Complejidad: {{complexity}}
+- Arquitectura: 20 sub-agentes en paralelo (cada uno procesa {{count}}/20 objetos)
 
 **Pasos que realizaré:**
 
 1. **Verificar pre-requisitos**
    ```bash
    # Verificar que Fase 1 está completa
-   test -f classification/complex_objects.txt || echo "ERROR: Fase 1 no completada"
+   test -f knowledge/classification/{{complexity}}_objects.txt || echo "ERROR: Archivo de clasificación no encontrado"
 
-   # Verificar que Fase 2A ejecutada
-   test -d migrated/simple/ || echo "WARNING: Fase 2A no ejecutada (ora2pg)"
+   # Verificar manifest
+   test -f sql/extracted/manifest.json || echo "ERROR: Manifest no encontrado"
    ```
 
-2. **Cargar objetos complejos**
-   - Leer `classification/complex_objects.txt`
-   - Filtrar por estrategia si se especificó
-   - Determinar rango de objetos para el batch
+2. **Cargar objetos a convertir**
+   - Leer `knowledge/classification/{{complexity}}_objects.txt`
+   - Si batch = "next", determinar automáticamente siguiente batch pendiente
+   - Calcular rango exacto de objetos (ej: objetos 101-300 para batch_002)
 
-3. **Invocar agente plsql-converter**
+3. **Procesar batch con 20 sub-agentes paralelos**
 
-   Usaré el Tool `Task` con estas especificaciones:
-   - `subagent_type`: "plsql-converter"
-   - `prompt`: Incluir batch, rango, estrategias a aplicar
-   - `description`: "Convertir batch {{batch}} objetos complejos"
+   Lanzaré **20 invocaciones simultáneas del Task tool** con `subagent_type: "oracle-postgres-migration:plsql-converter"`:
 
-   El agente creará automáticamente:
-   - 20 sub-agentes en paralelo
-   - Código SQL convertido en `migrated/complex/`
-   - Logs de decisiones en `conversion_log/`
-   - Aplicará estrategias arquitectónicas específicas
+   - **Sub-agente 1**: Procesa objetos 1-10 del batch
+   - **Sub-agente 2**: Procesa objetos 11-20 del batch
+   - **Sub-agente 3**: Procesa objetos 21-30 del batch
+   - ...
+   - **Sub-agente 20**: Procesa objetos 191-200 del batch
 
-4. **Actualizar progreso**
-   ```bash
-   python scripts/update_progress.py --phase 2B --update
-   ```
+   Cada sub-agente:
+   - Lee código fuente de `sql/extracted/` usando manifest.json
+   - Aplica reglas de conversión PostgreSQL automáticamente
+   - Genera archivos SQL en `sql/migrated/{{complexity}}/`
+   - Sigue filosofía minimalista (solo SQL, sin logs innecesarios)
+
+4. **Generar script de compilación consolidado**
+
+   Después de completar todos los sub-agentes, crearé:
+   - `sql/migrated/{{complexity}}/compile_batch_{{batch}}.sql`
+   - Contiene instrucciones psql para compilar todos los objetos del batch
 
 5. **Mostrar resumen**
-   - Objetos convertidos en este batch
-   - Estrategias aplicadas (distribución)
-   - Código generado (líneas, archivos)
-   - Siguiente batch recomendado
+   - Total objetos convertidos: X de {{count}}
+   - Archivos SQL generados
+   - Script de compilación: ruta completa
+   - Siguiente batch recomendado (si aplica)
+   - Instrucciones de compilación en PostgreSQL
 
-**Contexto arquitectónico clave:**
+**Contexto del agente plsql-converter:**
 
-El agente tiene conocimiento de:
-- AWS Aurora PostgreSQL 17.4 capabilities
-- AWS Lambda para reemplazar UTL_HTTP
-- S3 para reemplazar UTL_FILE
-- Extensiones disponibles: pgvector, pg_cron, dblink
-- Patrones de PostgreSQL modernos
+El agente tiene incorporadas:
+- ✅ Reglas de sintaxis PostgreSQL (sin comillas, minúsculas, sin (+), etc.)
+- ✅ Filosofía minimalista MENOS ES MÁS
+- ✅ Conocimiento de AWS Aurora PostgreSQL 17.4
+- ✅ Estrategias para características Oracle específicas
 
-¿Procedo con la conversión del batch {{batch}}?
+¿Procedo con la conversión del batch {{batch}} ({{complexity}})?
