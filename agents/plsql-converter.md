@@ -2,20 +2,20 @@
 agentName: plsql-converter
 color: green
 description: |
-  Convierte objetos PL/SQL COMPLEJOS de Oracle 19c a PL/pgSQL para PostgreSQL 17.4 (Amazon Aurora).
-  Aplica estrategias especializadas de conversión para features específicas de Oracle como
-  AUTONOMOUS_TRANSACTION, UTL_HTTP, DBMS_SQL, tipos de colección, y más.
+  Convierte objetos PL/SQL (SIMPLE y COMPLEX) de Oracle 19c a PL/pgSQL para PostgreSQL 17.4 (Amazon Aurora).
 
-  **Usa este agente cuando:** Conviertes objetos clasificados como COMPLEX que requieren decisiones
-  arquitectónicas y no pueden ser manejados por conversión automática de ora2pg.
+  **Para objetos SIMPLE:** Conversión sintáctica directa (VIEWs, FUNCTIONs básicas, PROCEDUREs simples)
+  **Para objetos COMPLEX:** Estrategias especializadas para AUTONOMOUS_TRANSACTION, UTL_HTTP, DBMS_SQL, etc.
 
-  **Input:** Lista de objetos complejos + base de conocimiento de plsql-analyzer
-  **Output:** Código PL/pgSQL convertido + documentación de conversión
+  **Usa este agente cuando:** Conviertes objetos clasificados como SIMPLE o COMPLEX cuando no tienes
+  acceso directo a la base de datos Oracle para usar ora2pg.
 
-  **Procesamiento por lotes:** Convierte 10 objetos complejos por instancia de agente. Lanza 20 agentes
-  en paralelo para 200 objetos por mensaje.
+  **Input:** Lista de objetos + manifest.json + archivos SQL locales
+  **Output:** Código PL/pgSQL convertido + reportes de conversión
 
-  **Fase:** FASE 2B - Conversión Compleja (5 horas total para ~3,122 objetos complejos)
+  **Procesamiento por lotes:** 100 objetos por invocación (10 objetos × 10 sub-agentes en paralelo)
+
+  **Fases:** FASE 2A (SIMPLE) + FASE 2B (COMPLEX)
 ---
 
 # Agente de Conversión PL/SQL a PL/pgSQL (Objetos Complejos)
@@ -133,7 +133,127 @@ $$;
 
 **Beneficio para ingenieros:** Migración transparente. Los ingenieros pueden comparar código Oracle vs PostgreSQL lado a lado sin confusión de nombres traducidos.
 
-## Estrategias de Conversión por Feature
+## Reglas de Sintaxis PostgreSQL (CRÍTICO - Aplica a TODOS los objetos)
+
+**IMPORTANTE:** Estas reglas se aplican a **TODOS** los objetos (SIMPLE y COMPLEX) para garantizar compilación exitosa en PostgreSQL.
+
+### 1. ❌ NUNCA usar comillas dobles en nombres de objetos
+
+```sql
+-- ❌ INCORRECTO (causa errores de compilación)
+CREATE VIEW "LATINO_OWNER"."NOMBRE_VISTA" AS...
+SELECT s."COLUMNA1", s."COLUMNA2" FROM tabla...
+
+-- ✅ CORRECTO
+CREATE VIEW latino_owner.nombre_vista AS...
+SELECT s.columna1, s.columna2 FROM tabla...
+```
+
+**Razón:** PostgreSQL interpreta nombres entre comillas dobles como case-sensitive. Usar minúsculas sin comillas es más compatible y evita errores.
+
+### 2. ✅ TODO en minúsculas (schemas, tablas, columnas, funciones)
+
+```sql
+-- ❌ INCORRECTO
+FROM DAF_DETALLES_ORDEN dt, DAF_PRESTACIONES pre
+WHERE dt.CODIGO_EMPRESA = pre.CODIGO_EMPRESA
+
+-- ✅ CORRECTO
+FROM daf_detalles_orden dt, daf_prestaciones pre
+WHERE dt.codigo_empresa = pre.codigo_empresa
+```
+
+**Razón:** PostgreSQL convierte nombres sin comillas a minúsculas automáticamente. Usar minúsculas desde el inicio previene problemas.
+
+### 3. ❌ Eliminar COMPLETAMENTE sintaxis Oracle `(+)` outer joins
+
+```sql
+-- ❌ INCORRECTO (syntax error en PostgreSQL)
+FROM tabla1 t1, tabla2 t2
+WHERE t1.id = t2.id (+)
+  AND t1.codigo = t2.codigo (+)
+
+-- ✅ CORRECTO - Convertir a LEFT JOIN explícito
+FROM tabla1 t1
+LEFT JOIN tabla2 t2
+  ON t1.id = t2.id
+  AND t1.codigo = t2.codigo
+```
+
+**Razón:** PostgreSQL no soporta sintaxis `(+)` de Oracle. Debe convertirse a JOIN explícito.
+
+### 4. ❌ Eliminar `WITH READ ONLY` de vistas
+
+```sql
+-- ❌ INCORRECTO
+CREATE VIEW nombre AS SELECT ... WITH READ ONLY;
+
+-- ✅ CORRECTO
+CREATE VIEW nombre AS SELECT ...;
+```
+
+**Razón:** PostgreSQL no soporta `WITH READ ONLY`. Las vistas son read-only por defecto.
+
+### 5. ❌ Eliminar `FROM dual` cuando no sea necesario
+
+```sql
+-- ❌ INCORRECTO
+SELECT 1.6 version, CURRENT_TIMESTAMP fecha FROM dual;
+
+-- ✅ CORRECTO
+SELECT 1.6 version, CURRENT_TIMESTAMP fecha;
+```
+
+**Razón:** PostgreSQL no requiere `FROM` para selects de constantes.
+
+### 6. ✅ Agregar `LANGUAGE plpgsql` a funciones/procedimientos
+
+```sql
+-- ❌ INCORRECTO
+CREATE FUNCTION nombre(...) RETURNS tipo IS
+BEGIN
+  ...
+END;
+
+-- ✅ CORRECTO
+CREATE FUNCTION nombre(...) RETURNS tipo
+LANGUAGE plpgsql AS $$
+BEGIN
+  ...
+END;
+$$;
+```
+
+**Razón:** PostgreSQL requiere especificar el lenguaje y usar delimitadores `$$`.
+
+### 7. ✅ Eliminar `FORCE` de CREATE VIEW
+
+```sql
+-- ❌ INCORRECTO
+CREATE OR REPLACE FORCE VIEW nombre AS...
+
+-- ✅ CORRECTO
+CREATE OR REPLACE VIEW nombre AS...
+```
+
+**Razón:** PostgreSQL no soporta palabra clave `FORCE`.
+
+### Checklist Pre-Generación (TODOS los objetos)
+
+Antes de generar archivos SQL, SIEMPRE verificar:
+
+- [ ] ❌ Sin comillas dobles en nombres
+- [ ] ✅ TODO en minúsculas (schemas, tablas, columnas, vistas, funciones)
+- [ ] ❌ Sin sintaxis Oracle `(+)` residual
+- [ ] ✅ Oracle outer joins convertidos a `LEFT JOIN` explícito
+- [ ] ❌ Sin `WITH READ ONLY`
+- [ ] ❌ Sin `FROM dual` innecesario
+- [ ] ❌ Sin `FORCE` en CREATE VIEW
+- [ ] ✅ FUNCTIONs/PROCEDUREs tienen `LANGUAGE plpgsql` y delimitadores `$$`
+- [ ] ✅ Tipos de datos convertidos correctamente
+- [ ] ✅ Funciones Oracle convertidas a equivalentes PostgreSQL
+
+## Estrategias de Conversión por Feature (Objetos COMPLEX)
 
 ### 1. AUTONOMOUS_TRANSACTION (~40 objetos)
 
@@ -450,106 +570,138 @@ SET lc_messages = 'es_ES.UTF-8';  -- Mensajes en español
 | `DBMS_OUTPUT.PUT_LINE('msg')` | `RAISE NOTICE 'msg'` |
 | `EXECUTE IMMEDIATE sql` | `EXECUTE sql` |
 
-## Estructura de Output
+## Estructura de Output (Filosofía Minimalista: MENOS ES MÁS)
 
-**Para cada lote de 10 objetos complejos:**
+**IMPORTANTE:** Solo crear archivos NECESARIOS. No generar documentación excesiva.
 
-### 1. Código PL/pgSQL convertido
+### Archivos a Generar
+
+#### 1. Código SQL Convertido (ÚNICO ARCHIVO OBLIGATORIO)
+
 ```
-migrated/complex/
+sql/migrated/{clasificacion}/
+  ├── views/
+  │   └── obj_XXXX_NOMBRE_VISTA.sql
   ├── functions/
-  │   └── PKG_AUDIT_LOG_ACTION.sql
+  │   └── obj_XXXX_NOMBRE_FUNCION.sql
   ├── procedures/
-  │   └── PKG_HTTP_CLIENT_POST.sql
-  └── packages/
-      └── PKG_VENTAS_schema.sql
+  │   └── obj_XXXX_NOMBRE_PROCEDIMIENTO.sql
+  ├── packages/
+  │   └── obj_XXXX_NOMBRE_PACKAGE.sql
+  └── triggers/
+      └── obj_XXXX_NOMBRE_TRIGGER.sql
 ```
 
-**Ejemplo archivo output (preservando idioma español del original):**
+**Formato del archivo SQL:**
 ```sql
--- migrated/complex/packages/PKG_AUDITORIA_schema.sql
--- Fuente: extracted/packages_body.sql (líneas 1234-1456)
--- Convertido por: plsql-converter
--- Fecha: 2025-01-05
--- Complejidad: COMPLEX (AUTONOMOUS_TRANSACTION)
--- Estrategia de conversión: dblink (Opción A)
+-- Migrado de Oracle a PostgreSQL 17.4
+-- Objeto original: {object_name} ({object_type})
+-- Object ID: {object_id}
+-- Clasificación: {SIMPLE|COMPLEX}
+-- Fecha de conversión: {timestamp}
+-- [SOLO para COMPLEX] Estrategia: {estrategia aplicada}
 
--- Crear schema para package
-CREATE SCHEMA IF NOT EXISTS pkg_auditoria;
-
--- Convertir procedimiento con AUTONOMOUS_TRANSACTION
--- NOTA: Nombres de variables y comentarios mantenidos en español del código original Oracle
-CREATE OR REPLACE PROCEDURE pkg_auditoria.registrar_accion(p_accion VARCHAR)
-LANGUAGE plpgsql AS $$
-BEGIN
-  -- Registrar acción de auditoría en tabla de log
-  -- Código Oracle original usaba PRAGMA AUTONOMOUS_TRANSACTION
-  -- Convertido a dblink para preservación exacta de comportamiento de commit independiente
-  PERFORM dblink_exec(
-    'dbname=veris_dev',
-    format('INSERT INTO log_auditoria VALUES (CURRENT_TIMESTAMP, %L)', p_accion)
-  );
-END;
-$$;
-
--- Otorgar permisos (coincidir permisos Oracle)
-GRANT EXECUTE ON PROCEDURE pkg_auditoria.registrar_accion TO public;
+{código PostgreSQL convertido - minúsculas, sin comillas dobles}
 ```
 
-### 2. Documentación de conversión
-```
-conversion_log/
-  └── PKG_AUDIT_LOG_ACTION.md
-```
-
-**Ejemplo log de conversión:**
-```markdown
-# Conversión: PKG_AUDITORIA.REGISTRAR_ACCION
-
-**Object ID:** obj_002
-**Tipo:** PACKAGE BODY PROCEDURE
-**Complejidad:** COMPLEX
-**Feature:** AUTONOMOUS_TRANSACTION
-
-## Código Oracle Original
+**Ejemplo:**
 ```sql
-CREATE OR REPLACE PROCEDURE registrar_accion_auditoria(p_accion VARCHAR2) IS
-  PRAGMA AUTONOMOUS_TRANSACTION;
-  v_fecha_registro DATE;
-BEGIN
-  v_fecha_registro := SYSDATE;
-  -- Registrar acción de auditoría en tabla de log
-  INSERT INTO log_auditoria VALUES (v_fecha_registro, p_accion);
-  COMMIT;  -- Commit independiente de transacción principal
-END;
+-- Migrado de Oracle a PostgreSQL 17.4
+-- Objeto original: COM_V_CONVENIOS (VIEW)
+-- Object ID: obj_9346
+-- Clasificación: SIMPLE
+-- Fecha de conversión: 2026-01-18 20:30:00
+
+CREATE OR REPLACE VIEW latino_owner.com_v_convenios AS
+SELECT cl.codigo_empresa,
+       cl.codigo_convenio,
+       cl.titulo_para_reporte AS nombre_convenio
+FROM com_convenios_clientes cl
+LEFT JOIN dwh_com_dim_convenios_geren con
+  ON con.codigo_empresa = cl.codigo_empresa;
 ```
 
-## Código PostgreSQL Convertido
-- **Estrategia:** dblink (Opción A)
-- **Rationale:** Preserva comportamiento exacto de Oracle (commit independiente)
-- **Archivo:** migrated/complex/packages/PKG_AUDITORIA_schema.sql
+#### 2. Script de Compilación Consolidado (GENERADO AL FINAL)
 
-## Cambios Aplicados
-1. ✅ Reemplazado PRAGMA AUTONOMOUS_TRANSACTION con dblink_exec
-2. ✅ Convertido SYSDATE → CURRENT_TIMESTAMP
-3. ✅ Encapsulado INSERT en format() para protección de inyección SQL
-4. ✅ Removido COMMIT explícito (dblink auto-commit)
-5. ✅ **Preservado idioma español:** nombres de variables (v_fecha_registro, p_accion) y comentarios mantenidos tal cual el original
+**Generar UN SOLO script** al finalizar el batch completo:
 
-## Notas de Migración
-- ⚠️ **Overhead:** dblink añade ~5-10ms latencia por llamada
-- ✅ **Comportamiento:** Idéntico a Oracle (a prueba de rollback)
-- 🔄 **Alternativa:** Considerar rediseño a tabla staging + pg_cron si el performance es crítico
-
-## Checklist de Testing
-- [ ] Compila sin errores en PostgreSQL 17.4
-- [ ] Entradas de audit log persisten después de rollback de transacción principal
-- [ ] Performance aceptable (< 50ms tiempo total de ejecución)
-
-## Referencias
-- Decision 2: Estrategia AUTONOMOUS_TRANSACTION
-- AWS Extension: dblink 1.2 (instalada ✅)
 ```
+sql/migrated/{clasificacion}/compile_all.sql
+```
+
+**Contenido:**
+```sql
+-- Script de compilación consolidada
+-- PostgreSQL 17.4
+-- Generado: {timestamp}
+
+SET search_path TO latino_owner, public;
+
+-- VIEWs
+\i views/obj_9346_COM_V_CONVENIOS.sql
+\i views/obj_9347_DAF_SUCURSALES_DIGITAL.sql
+-- ... todas las vistas
+
+-- FUNCTIONs
+\i functions/obj_9560_FAC_F_OBTENER_TRANSACCION.sql
+-- ... todas las funciones
+
+-- PROCEDUREs
+\i procedures/obj_XXXX_NOMBRE.sql
+-- ... todos los procedimientos
+
+-- Verificar objetos creados
+SELECT 'VIEWs creadas:' as tipo, COUNT(*) as total
+FROM information_schema.views WHERE table_schema = 'latino_owner'
+UNION ALL
+SELECT 'FUNCTIONs creadas:', COUNT(*)
+FROM information_schema.routines WHERE routine_schema = 'latino_owner' AND routine_type = 'FUNCTION';
+```
+
+### ❌ NO Generar (A Menos que Explícitamente Solicitado)
+
+- ❌ Archivos de log individuales por objeto (`conversion_log/*.md`)
+- ❌ Múltiples reportes (`batch_XXX_report.md`, `FINAL_REPORT.md`, `README.md`)
+- ❌ Scripts temporales de corrección
+- ❌ Archivos intermedios
+
+### ✅ Opcional: UN Reporte Consolidado Final
+
+**Solo si se solicita explícitamente**, generar UN SOLO reporte al final de TODO el batch:
+
+```
+sql/migrated/{clasificacion}/CONVERSION_SUMMARY.txt
+```
+
+**Formato minimalista:**
+```
+RESUMEN DE CONVERSIÓN
+======================
+Fecha: 2026-01-18
+Clasificación: SIMPLE/COMPLEX
+Total objetos: 100
+
+Por tipo:
+- VIEWs: 40
+- FUNCTIONs: 57
+- MVIEWs: 3
+
+Estado:
+- Compilados exitosamente: 99
+- Requieren revisión manual: 1
+  - obj_9352: Oracle (+) joins complejos
+
+Objetos compilados en PostgreSQL: 99/100 (99%)
+```
+
+### Principio Minimalista
+
+**"Solo genera lo que es ESENCIAL para compilar el código en PostgreSQL"**
+
+1. ✅ Código SQL convertido = ESENCIAL
+2. ✅ Script de compilación = ÚTIL
+3. ❌ Documentación extensa = INNECESARIA (el código debe ser auto-explicativo)
+4. ❌ Logs individuales = SOLO para decisiones arquitectónicas complejas
 
 ## Guías Importantes
 
