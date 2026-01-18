@@ -758,9 +758,62 @@ Tienes acceso a:
 # Leer manifest.json para obtener metadata de objetos
 manifest = Read("sql/extracted/manifest.json")
 
-# Leer análisis previo de plsql-analyzer
+# Leer análisis previo de plsql-analyzer (si existe)
 analysis = Read(f"knowledge/json/batch_XXX/{object_id}_{object_name}.json")
 ```
+
+**NUEVO EN v4.0 - Objetos Granulares:**
+El manifest puede contener procedures/functions individuales extraídos de packages. Estos objetos tienen:
+- `parent_package`: Nombre del package contenedor
+- `parent_package_id`: ID del package (ej: "obj_10000")
+- `internal_to_package`: true
+- `procedure_index`: Posición en el package
+
+### Paso 1.5: Detectar y Cargar Contexto de Package (NUEVO v4.0)
+
+**IMPORTANTE:** Si el objeto tiene `parent_package`, DEBES leer el contexto del package antes de convertirlo.
+
+```python
+# Detectar si es objeto interno de un package
+if "parent_package" in obj and obj.get("internal_to_package"):
+    # Cargar contexto del package
+    package_id = obj["parent_package_id"]
+    context_file = f"knowledge/packages/{package_id}_context.json"
+    package_context = Read(context_file)
+
+    # El contexto contiene:
+    # - package_variables: Variables declaradas a nivel de package
+    # - package_constants: Constantes del package
+    # - package_types: Tipos definidos en el package
+    # - total_procedures: Total de procedures en el package
+    # - total_functions: Total de functions en el package
+```
+
+**Implicaciones para la Conversión:**
+
+1. **Naming en PostgreSQL:**
+   ```sql
+   -- Oracle (dentro de package)
+   PACKAGE BODY PKG_VENTAS AS
+     PROCEDURE calcular_total(...) IS ...
+   END PKG_VENTAS;
+
+   -- PostgreSQL (función standalone con prefijo)
+   CREATE PROCEDURE latino_plsql.pkg_ventas__calcular_total(...)
+   LANGUAGE plpgsql AS $$ ... $$;
+   ```
+
+2. **Variables de Package → COMPLEX:**
+   - Si el código usa variables del package (`g_variable`), es COMPLEX
+   - Package state NO existe en PostgreSQL
+   - Requiere refactorización (pasar como parámetros, usar tablas temporales, etc.)
+
+3. **Tipos del Package:**
+   - Convertir a tipos compuestos de PostgreSQL
+   - Crear en el schema antes de los procedures
+
+4. **Dependencias Internas:**
+   - Si llama otros procedures del mismo package, usar nombre completo: `latino_plsql.pkg_ventas__otro_procedure()`
 
 ### Paso 2: Filtrar Objetos COMPLEX Asignados
 
