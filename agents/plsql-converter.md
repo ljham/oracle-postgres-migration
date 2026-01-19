@@ -1081,20 +1081,267 @@ line_end = obj["line_end"]
 plsql_code = Read(source_file, offset=line_start-1, limit=line_end-line_start+1)
 ```
 
-### Paso 4: Leer Conocimiento de Negocio
+### Paso 4: Leer Conocimiento de Negocio (CRÍTICO)
+
+**IMPORTANTE:** SIEMPRE leer el análisis previo de plsql-analyzer antes de convertir. Este conocimiento es ESENCIAL para una conversión inteligente.
 
 ```python
 # Leer análisis previo de plsql-analyzer
 object_id = obj["object_id"]
 object_name = obj["object_name"].replace(".", "_")
-analysis_file = f"knowledge/json/batch_XXX/{object_id}_{object_name}.json"
-business_knowledge = Read(analysis_file)
 
-# El análisis contiene:
-# - business_knowledge: Reglas de negocio, propósito
-# - technical_details: Dependencias, features detectadas
-# - classification: Razonamiento de complejidad
+# Determinar ruta del archivo de conocimiento
+# Nota: puede estar en batch_001/, batch_002/, etc.
+knowledge_file = f"knowledge/json/batch_XXX/{object_id}_{object_name}.json"
+business_knowledge = Read(knowledge_file)
 ```
+
+**Estructura del JSON de conocimiento:**
+
+```json
+{
+  "object_id": "obj_10425",
+  "object_name": "PKG_VENTAS.CALCULAR_TOTAL",
+  "business_knowledge": {
+    "purpose": "Calcular total de orden con descuentos e impuestos",
+    "business_rules": [
+      "Descuento 5% para órdenes < $1000",
+      "IVA 12% se aplica DESPUÉS del descuento",
+      "Validar que cliente esté activo"
+    ],
+    "calculations": [
+      {
+        "name": "subtotal",
+        "formula": "SUM(precio * cantidad)",
+        "description": "Suma de productos"
+      },
+      {
+        "name": "iva",
+        "formula": "(subtotal - descuento) * 0.12",
+        "description": "IVA 12% sobre monto con descuento"
+      }
+    ],
+    "validations": [
+      "Cliente debe estar activo",
+      "Orden debe existir"
+    ],
+    "workflow": "Validar → Calcular subtotal → Descuento → IVA"
+  },
+  "technical_details": {
+    "dependencies": {
+      "tables": ["ORDENES", "ORDEN_DETALLES", "CLIENTES"],
+      "procedures": ["PKG_VENTAS.VALIDAR_ORDEN"],
+      "functions": ["PKG_VENTAS.OBTENER_PRECIO"]
+    },
+    "oracle_features": ["BULK COLLECT"],
+    "complexity_indicators": {
+      "lines_of_code": 120,
+      "number_of_sql_statements": 5
+    }
+  },
+  "classification": {
+    "category": "SIMPLE",
+    "reasoning": "Lógica directa sin features Oracle complejas"
+  }
+}
+```
+
+### Paso 4.5: USAR el Conocimiento para Diseñar Estrategia de Conversión
+
+**NO solo leas el JSON y lo ignores. ÚSALO activamente para:**
+
+#### 1. **Entender el Propósito del Código**
+
+```python
+# Del JSON
+purpose = business_knowledge["business_knowledge"]["purpose"]
+# → "Calcular total de orden con descuentos e impuestos"
+
+# En la conversión, agregar comentario descriptivo:
+"""
+CREATE PROCEDURE pkg_ventas.calcular_total(...)
+-- Propósito: Calcular total de orden con descuentos e impuestos
+-- Regla crítica: IVA 12% se aplica DESPUÉS del descuento
+LANGUAGE plpgsql AS $$
+"""
+```
+
+#### 2. **Aplicar Reglas de Negocio Correctamente**
+
+```python
+# Del JSON
+business_rules = business_knowledge["business_knowledge"]["business_rules"]
+# → ["IVA 12% se aplica DESPUÉS del descuento"]
+
+# Al convertir, ASEGURAR que el orden sea correcto:
+"""
+-- Aplicar descuento PRIMERO
+v_descuento := CASE
+  WHEN v_subtotal < 1000 THEN v_subtotal * 0.05
+  ELSE v_subtotal * 0.10
+END;
+
+-- Luego calcular IVA (regla de negocio crítica)
+v_iva := (v_subtotal - v_descuento) * 0.12;  -- 12% DESPUÉS de descuento
+"""
+```
+
+#### 3. **Preservar Cálculos Específicos**
+
+```python
+# Del JSON
+calculations = business_knowledge["business_knowledge"]["calculations"]
+# → [{"name": "iva", "formula": "(subtotal - descuento) * 0.12"}]
+
+# En PostgreSQL, mantener la MISMA fórmula:
+v_iva := (v_subtotal - v_descuento) * 0.12;  -- No cambiar a 0.13 o alterar
+```
+
+#### 4. **Mantener Validaciones Críticas**
+
+```python
+# Del JSON
+validations = business_knowledge["business_knowledge"]["validations"]
+# → ["Cliente debe estar activo", "Orden debe existir"]
+
+# En PostgreSQL, preservar todas las validaciones:
+"""
+-- Validación crítica de negocio
+IF NOT EXISTS (SELECT 1 FROM clientes WHERE id = p_cliente_id AND activo = true) THEN
+  RAISE EXCEPTION 'Cliente no está activo';
+END IF;
+
+IF NOT EXISTS (SELECT 1 FROM ordenes WHERE id = p_orden_id) THEN
+  RAISE EXCEPTION 'Orden no existe';
+END IF;
+"""
+```
+
+#### 5. **Respetar Dependencias**
+
+```python
+# Del JSON
+dependencies = business_knowledge["technical_details"]["dependencies"]
+# → {"procedures": ["PKG_VENTAS.VALIDAR_ORDEN"]}
+
+# Al convertir, llamar al procedure correcto (con schema):
+"""
+-- Llamar a procedure del mismo package
+PERFORM pkg_ventas.validar_orden(p_orden_id);  -- Usar schema correcto
+"""
+```
+
+#### 6. **Detectar Features Oracle y Aplicar Estrategia**
+
+```python
+# Del JSON
+oracle_features = business_knowledge["technical_details"]["oracle_features"]
+# → ["BULK COLLECT"]
+
+# Aplicar estrategia específica para BULK COLLECT:
+# - Convertir a ARRAY en PostgreSQL
+# - Usar FOREACH loop en lugar de FORALL
+```
+
+#### 7. **Agregar Comentarios de Negocio en el Código Generado**
+
+```sql
+CREATE PROCEDURE pkg_ventas.calcular_total(
+  p_orden_id INTEGER,
+  p_total OUT NUMERIC
+)
+LANGUAGE plpgsql AS $$
+-- ============================================================================
+-- CONOCIMIENTO DE NEGOCIO (preservado de análisis):
+--
+-- Propósito: Calcular total de orden con descuentos e impuestos
+--
+-- Reglas de Negocio Críticas:
+--   1. Descuento 5% para órdenes < $1000, 10% para >= $1000
+--   2. IVA 12% se aplica DESPUÉS del descuento (no antes)
+--   3. Cliente debe estar activo para procesar
+--
+-- Workflow: Validar → Calcular subtotal → Aplicar descuento → Calcular IVA
+-- ============================================================================
+DECLARE
+  v_subtotal NUMERIC;
+  v_descuento NUMERIC;
+  v_iva NUMERIC;
+BEGIN
+  -- Validación crítica de negocio
+  IF NOT EXISTS (SELECT 1 FROM clientes WHERE id = p_cliente_id AND activo = true) THEN
+    RAISE EXCEPTION 'Cliente no está activo';
+  END IF;
+
+  -- Calcular subtotal
+  SELECT SUM(precio * cantidad) INTO v_subtotal
+  FROM orden_detalles
+  WHERE orden_id = p_orden_id;
+
+  -- Aplicar descuento (regla de negocio)
+  v_descuento := CASE
+    WHEN v_subtotal < 1000 THEN v_subtotal * 0.05
+    ELSE v_subtotal * 0.10
+  END;
+
+  -- Calcular IVA 12% DESPUÉS de descuento (regla crítica)
+  v_iva := (v_subtotal - v_descuento) * 0.12;
+
+  -- Total final
+  p_total := v_subtotal - v_descuento + v_iva;
+END;
+$$;
+```
+
+### Ejemplo Completo: Conversión CON vs SIN Conocimiento
+
+**SIN leer el conocimiento (conversión ciega):**
+```sql
+-- Solo convierte sintaxis mecánicamente
+CREATE PROCEDURE pkg_ventas.calcular_total(...) AS $$
+DECLARE
+  v_total NUMERIC;
+BEGIN
+  SELECT SUM(precio * cantidad) INTO v_total FROM orden_detalles;
+  -- ¿Y el descuento? ¿Y el IVA? ¿En qué orden?
+END;
+$$;
+```
+
+**CON conocimiento (conversión inteligente):**
+```sql
+-- Usa conocimiento de negocio para generar código correcto
+CREATE PROCEDURE pkg_ventas.calcular_total(...) AS $$
+-- Conocimiento de negocio aplicado:
+-- - IVA 12% DESPUÉS de descuento (no antes)
+-- - Validación de cliente activo
+-- - Descuento según monto
+DECLARE
+  v_subtotal NUMERIC;
+  v_descuento NUMERIC;
+  v_iva NUMERIC;
+BEGIN
+  -- Validación (del análisis)
+  IF NOT EXISTS (SELECT 1 FROM clientes WHERE id = p_cliente_id AND activo = true) THEN
+    RAISE EXCEPTION 'Cliente no activo';
+  END IF;
+
+  -- Subtotal
+  SELECT SUM(precio * cantidad) INTO v_subtotal FROM orden_detalles;
+
+  -- Descuento (regla de negocio del análisis)
+  v_descuento := CASE WHEN v_subtotal < 1000 THEN v_subtotal * 0.05
+                      ELSE v_subtotal * 0.10 END;
+
+  -- IVA DESPUÉS de descuento (regla crítica del análisis)
+  v_iva := (v_subtotal - v_descuento) * 0.12;
+
+  p_total := v_subtotal - v_descuento + v_iva;
+END;
+$$;
+```
+
+**Diferencia:** La segunda conversión es **correcta** porque entiende la lógica de negocio del análisis.
 
 ### Paso 5: Generar Outputs con Nombres Correctos
 
