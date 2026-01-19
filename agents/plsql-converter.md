@@ -242,6 +242,7 @@ CREATE OR REPLACE VIEW nombre AS...
 
 Antes de generar archivos SQL, SIEMPRE verificar:
 
+**Sintaxis PostgreSQL Básica:**
 - [ ] ❌ Sin comillas dobles en nombres
 - [ ] ✅ TODO en minúsculas (schemas, tablas, columnas, vistas, funciones)
 - [ ] ❌ Sin sintaxis Oracle `(+)` residual
@@ -252,6 +253,30 @@ Antes de generar archivos SQL, SIEMPRE verificar:
 - [ ] ✅ FUNCTIONs/PROCEDUREs tienen `LANGUAGE plpgsql` y delimitadores `$$`
 - [ ] ✅ Tipos de datos convertidos correctamente
 - [ ] ✅ Funciones Oracle convertidas a equivalentes PostgreSQL
+
+**Gestión de Packages (NUEVO v4.0):**
+- [ ] ✅ Si el objeto tiene `parent_package`: crear directorio `{package_name_lowercase}/`
+- [ ] ✅ Si NO tiene `parent_package`: usar directorio `standalone/{functions|procedures}/`
+- [ ] ✅ Generar `_create_schema.sql` UNA sola vez por package (solo el primer objeto del package)
+- [ ] ✅ Usar namespace schema: `CREATE PROCEDURE {schema}.{procedure_name}` (no `{schema}__{procedure_name}`)
+- [ ] ✅ Llamadas internas al mismo package deben usar schema: `{schema}.otro_procedure()`
+- [ ] ✅ Verificar si el procedure usa variables de package (→ clasificar como COMPLEX)
+
+**Ejemplo de Detección:**
+```python
+# Para objeto con parent_package
+if obj.get("parent_package"):
+    schema_name = obj["parent_package"].lower()  # "PKG_VENTAS" → "pkg_ventas"
+    output_dir = f"sql/migrated/simple/{schema_name}/"
+    procedure_name = obj["object_name"].split(".")[-1].lower()  # "PKG_VENTAS.CALCULAR_TOTAL" → "calcular_total"
+
+    # Generar _create_schema.sql solo UNA vez (detectar si ya existe)
+    if not exists(f"{output_dir}/_create_schema.sql"):
+        generate_create_schema_file(schema_name, package_context)
+else:
+    # Objeto standalone
+    output_dir = f"sql/migrated/simple/standalone/{obj['object_type'].lower()}s/"
+```
 
 ## Estrategias de Conversión por Feature (Objetos COMPLEX)
 
@@ -578,47 +603,117 @@ SET lc_messages = 'es_ES.UTF-8';  -- Mensajes en español
 
 #### 1. Código SQL Convertido (ÚNICO ARCHIVO OBLIGATORIO)
 
+**Estructura Organizada por Packages:**
+
 ```
 sql/migrated/{clasificacion}/
+  ├── pkg_ventas/                           # Schema por package
+  │   ├── _create_schema.sql                # Crear schema
+  │   ├── calcular_total.sql                # Procedure del package
+  │   ├── obtener_precio.sql                # Function del package
+  │   └── registrar_venta.sql
+  ├── pkg_facturacion/
+  │   ├── _create_schema.sql
+  │   ├── generar_factura.sql
+  │   └── calcular_impuesto.sql
+  ├── standalone/                           # Procedures/Functions sin package
+  │   ├── functions/
+  │   │   └── obj_XXXX_validar_email.sql
+  │   └── procedures/
+  │       └── obj_XXXX_procesar_log.sql
   ├── views/
-  │   └── obj_XXXX_NOMBRE_VISTA.sql
-  ├── functions/
-  │   └── obj_XXXX_NOMBRE_FUNCION.sql
-  ├── procedures/
-  │   └── obj_XXXX_NOMBRE_PROCEDIMIENTO.sql
-  ├── packages/
-  │   └── obj_XXXX_NOMBRE_PACKAGE.sql
-  └── triggers/
-      └── obj_XXXX_NOMBRE_TRIGGER.sql
+  │   └── obj_XXXX_nombre_vista.sql
+  ├── triggers/
+  │   └── obj_XXXX_nombre_trigger.sql
+  └── compile_all.sql                       # Script maestro
 ```
 
-**Formato del archivo SQL:**
+**Criterio de organización:**
+- **Si el objeto tiene `parent_package`:** → Directorio `{package_name_lowercase}/`
+- **Si NO tiene `parent_package`:** → Directorio `standalone/{functions|procedures}/`
+- **Views, Triggers:** → Directorios propios (no están en packages)
+
+**Formato del archivo SQL para Procedures/Functions de Package:**
+
 ```sql
 -- Migrado de Oracle a PostgreSQL 17.4
+-- Package original: {parent_package}
 -- Objeto original: {object_name} ({object_type})
 -- Object ID: {object_id}
 -- Clasificación: {SIMPLE|COMPLEX}
 -- Fecha de conversión: {timestamp}
 -- [SOLO para COMPLEX] Estrategia: {estrategia aplicada}
 
-{código PostgreSQL convertido - minúsculas, sin comillas dobles}
+CREATE OR REPLACE {PROCEDURE|FUNCTION} {schema}.{procedure_name}(...)
+{RETURNS tipo}  -- Solo para functions
+LANGUAGE plpgsql AS $$
+DECLARE
+  ...
+BEGIN
+  ...
+END;
+$$;
 ```
 
-**Ejemplo:**
+**Formato del archivo _create_schema.sql:**
+
+```sql
+-- Migrado de Oracle PACKAGE: {PACKAGE_NAME}
+-- PostgreSQL Schema: {schema_name}
+-- Total procedures: {count}
+-- Total functions: {count}
+-- Fecha de conversión: {timestamp}
+
+CREATE SCHEMA IF NOT EXISTS {schema_name};
+
+-- Comentario del schema
+COMMENT ON SCHEMA {schema_name} IS 'Package {PACKAGE_NAME} migrado de Oracle 19c';
+
+-- Grants (si aplica)
+GRANT USAGE ON SCHEMA {schema_name} TO app_user;
+```
+
+**Ejemplo Procedure de Package:**
 ```sql
 -- Migrado de Oracle a PostgreSQL 17.4
--- Objeto original: COM_V_CONVENIOS (VIEW)
--- Object ID: obj_9346
+-- Package original: PKG_VENTAS
+-- Objeto original: PKG_VENTAS.CALCULAR_TOTAL (PROCEDURE)
+-- Object ID: obj_10425
 -- Clasificación: SIMPLE
 -- Fecha de conversión: 2026-01-18 20:30:00
 
-CREATE OR REPLACE VIEW latino_owner.com_v_convenios AS
-SELECT cl.codigo_empresa,
-       cl.codigo_convenio,
-       cl.titulo_para_reporte AS nombre_convenio
-FROM com_convenios_clientes cl
-LEFT JOIN dwh_com_dim_convenios_geren con
-  ON con.codigo_empresa = cl.codigo_empresa;
+CREATE OR REPLACE PROCEDURE pkg_ventas.calcular_total(
+  p_orden_id IN INTEGER,
+  p_total OUT NUMERIC
+)
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_subtotal NUMERIC;
+BEGIN
+  SELECT SUM(precio * cantidad) INTO v_subtotal
+  FROM orden_detalles
+  WHERE orden_id = p_orden_id;
+
+  p_total := v_subtotal * 1.12;  -- IVA 12%
+END;
+$$;
+```
+
+**Ejemplo Function Standalone (sin package):**
+```sql
+-- Migrado de Oracle a PostgreSQL 17.4
+-- Objeto original: VALIDAR_EMAIL (FUNCTION)
+-- Object ID: obj_9560
+-- Clasificación: SIMPLE
+-- Fecha de conversión: 2026-01-18 20:30:00
+
+CREATE OR REPLACE FUNCTION latino_owner.validar_email(p_email VARCHAR)
+RETURNS BOOLEAN
+LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN p_email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$';
+END;
+$$;
 ```
 
 #### 2. Script de Compilación Consolidado (GENERADO AL FINAL)
@@ -629,33 +724,101 @@ LEFT JOIN dwh_com_dim_convenios_geren con
 sql/migrated/{clasificacion}/compile_all.sql
 ```
 
-**Contenido:**
+**Contenido con Schemas por Package:**
 ```sql
 -- Script de compilación consolidada
 -- PostgreSQL 17.4
 -- Generado: {timestamp}
+-- Estrategia: Schema por Package + Objetos Standalone
+
+================================================================================
+PASO 1: CREAR SCHEMAS DE PACKAGES
+================================================================================
+
+\i pkg_ventas/_create_schema.sql
+\i pkg_facturacion/_create_schema.sql
+\i pkg_inventario/_create_schema.sql
+-- ... todos los schemas de packages
+
+================================================================================
+PASO 2: COMPILAR OBJETOS DE REFERENCIA (VIEWs)
+================================================================================
 
 SET search_path TO latino_owner, public;
 
--- VIEWs
-\i views/obj_9346_COM_V_CONVENIOS.sql
-\i views/obj_9347_DAF_SUCURSALES_DIGITAL.sql
+\i views/obj_9346_com_v_convenios.sql
+\i views/obj_9347_daf_sucursales_digital.sql
 -- ... todas las vistas
 
--- FUNCTIONs
-\i functions/obj_9560_FAC_F_OBTENER_TRANSACCION.sql
--- ... todas las funciones
+================================================================================
+PASO 3: COMPILAR PROCEDURES/FUNCTIONS POR PACKAGE
+================================================================================
 
--- PROCEDUREs
-\i procedures/obj_XXXX_NOMBRE.sql
--- ... todos los procedimientos
+-- Package: PKG_VENTAS
+\i pkg_ventas/calcular_total.sql
+\i pkg_ventas/obtener_precio.sql
+\i pkg_ventas/registrar_venta.sql
 
--- Verificar objetos creados
-SELECT 'VIEWs creadas:' as tipo, COUNT(*) as total
-FROM information_schema.views WHERE table_schema = 'latino_owner'
-UNION ALL
-SELECT 'FUNCTIONs creadas:', COUNT(*)
-FROM information_schema.routines WHERE routine_schema = 'latino_owner' AND routine_type = 'FUNCTION';
+-- Package: PKG_FACTURACION
+\i pkg_facturacion/generar_factura.sql
+\i pkg_facturacion/calcular_impuesto.sql
+
+-- ... todos los packages
+
+================================================================================
+PASO 4: COMPILAR PROCEDURES/FUNCTIONS STANDALONE (sin package)
+================================================================================
+
+SET search_path TO latino_owner, public;
+
+\i standalone/functions/obj_9560_validar_email.sql
+\i standalone/procedures/obj_XXXX_procesar_log.sql
+-- ... todos los objetos standalone
+
+================================================================================
+PASO 5: COMPILAR TRIGGERS
+================================================================================
+
+\i triggers/obj_XXXX_nombre_trigger.sql
+-- ... todos los triggers
+
+================================================================================
+VERIFICACIÓN
+================================================================================
+
+-- VIEWs creadas
+SELECT 'VIEWs en latino_owner:' as tipo, COUNT(*) as total
+FROM information_schema.views WHERE table_schema = 'latino_owner';
+
+-- Schemas de packages creados
+SELECT 'Schemas de packages:' as tipo, COUNT(*) as total
+FROM information_schema.schemata
+WHERE schema_name LIKE 'pkg_%';
+
+-- Procedures/Functions por schema
+SELECT
+  routine_schema as schema,
+  routine_type as tipo,
+  COUNT(*) as total
+FROM information_schema.routines
+WHERE routine_schema LIKE 'pkg_%' OR routine_schema = 'latino_owner'
+GROUP BY routine_schema, routine_type
+ORDER BY routine_schema, routine_type;
+```
+
+**Instrucciones de Ejecución:**
+```bash
+# Conectar a PostgreSQL
+psql -h host -p 5432 -U postgress -d codex
+
+# Ejecutar script consolidado
+\i sql/migrated/simple/compile_all.sql
+
+# Verificar resultados
+SELECT schema_name, COUNT(*)
+FROM information_schema.routines
+WHERE schema_name LIKE 'pkg_%'
+GROUP BY schema_name;
 ```
 
 ### ❌ NO Generar (A Menos que Explícitamente Solicitado)
@@ -791,29 +954,105 @@ if "parent_package" in obj and obj.get("internal_to_package"):
 
 **Implicaciones para la Conversión:**
 
-1. **Naming en PostgreSQL:**
+1. **SCHEMAS de PostgreSQL para Simular PACKAGES:**
+
+   **ESTRATEGIA:** Cada PACKAGE de Oracle se convierte en un SCHEMA dedicado en PostgreSQL.
+
    ```sql
    -- Oracle (dentro de package)
-   PACKAGE BODY PKG_VENTAS AS
-     PROCEDURE calcular_total(...) IS ...
+   CREATE PACKAGE BODY PKG_VENTAS AS
+     PROCEDURE calcular_total(...) IS ... END;
+     FUNCTION obtener_precio(...) RETURN NUMBER IS ... END;
    END PKG_VENTAS;
 
-   -- PostgreSQL (función standalone con prefijo)
-   CREATE PROCEDURE latino_plsql.pkg_ventas__calcular_total(...)
+   -- PostgreSQL (cada package → schema dedicado)
+   CREATE SCHEMA IF NOT EXISTS pkg_ventas;
+
+   CREATE PROCEDURE pkg_ventas.calcular_total(...)
    LANGUAGE plpgsql AS $$ ... $$;
+
+   CREATE FUNCTION pkg_ventas.obtener_precio(...)
+   RETURNS NUMERIC LANGUAGE plpgsql AS $$ ... $$;
    ```
 
-2. **Variables de Package → COMPLEX:**
+   **Naming Convention:**
+   - Package Oracle: `PKG_VENTAS` → Schema PostgreSQL: `pkg_ventas` (lowercase)
+   - Procedure Oracle: `CALCULAR_TOTAL` → Procedure PostgreSQL: `calcular_total` (lowercase)
+   - Namespace completo: `pkg_ventas.calcular_total` (natural, sin prefijos)
+
+2. **Generación de Scripts por Package:**
+
+   **Estructura de archivos recomendada:**
+   ```
+   sql/migrated/simple/
+   ├─ pkg_ventas/
+   │   ├─ _create_schema.sql              # CREATE SCHEMA pkg_ventas;
+   │   ├─ calcular_total.sql              # CREATE PROCEDURE pkg_ventas.calcular_total
+   │   ├─ obtener_precio.sql              # CREATE FUNCTION pkg_ventas.obtener_precio
+   │   └─ registrar_venta.sql
+   └─ compile_all.sql                     # Script maestro que compila todo
+   ```
+
+   **Script de creación de schema (_create_schema.sql):**
+   ```sql
+   -- Migrado de Oracle PACKAGE: PKG_VENTAS
+   -- PostgreSQL Schema: pkg_ventas
+   -- Total procedures: 5
+   -- Total functions: 3
+
+   CREATE SCHEMA IF NOT EXISTS pkg_ventas;
+
+   -- Comentario del schema
+   COMMENT ON SCHEMA pkg_ventas IS 'Package PKG_VENTAS migrado de Oracle 19c';
+   ```
+
+3. **Llamadas Internas entre Procedures del Mismo Package:**
+
+   ```sql
+   -- Oracle (dentro del package, llamada directa)
+   PROCEDURE calcular_descuento(...) IS
+     v_total NUMBER;
+   BEGIN
+     v_total := calcular_total(...);  -- Llamada interna sin prefijo
+   END;
+
+   -- PostgreSQL (usar schema explícito)
+   CREATE PROCEDURE pkg_ventas.calcular_descuento(...) AS $$
+   DECLARE
+     v_total NUMERIC;
+   BEGIN
+     v_total := pkg_ventas.calcular_total(...);  -- Schema explícito
+   END;
+   $$ LANGUAGE plpgsql;
+   ```
+
+   **IMPORTANTE:** Detectar llamadas a procedures del mismo package y agregar el prefijo del schema.
+
+4. **Variables de Package → COMPLEX:**
    - Si el código usa variables del package (`g_variable`), es COMPLEX
    - Package state NO existe en PostgreSQL
    - Requiere refactorización (pasar como parámetros, usar tablas temporales, etc.)
 
-3. **Tipos del Package:**
+5. **Tipos del Package:**
    - Convertir a tipos compuestos de PostgreSQL
-   - Crear en el schema antes de los procedures
+   - Crear en el schema del package
+   ```sql
+   CREATE TYPE pkg_ventas.t_venta AS (
+     id INTEGER,
+     monto NUMERIC,
+     fecha TIMESTAMP
+   );
+   ```
 
-4. **Dependencias Internas:**
-   - Si llama otros procedures del mismo package, usar nombre completo: `latino_plsql.pkg_ventas__otro_procedure()`
+6. **Permisos Granulares por Package:**
+
+   **Ventaja:** Permisos a nivel schema (más simple que función por función)
+   ```sql
+   -- Dar acceso a TODO el package/schema
+   GRANT USAGE ON SCHEMA pkg_ventas TO app_user;
+   GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pkg_ventas TO app_user;
+   GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA pkg_ventas TO app_user;
+   ```
 
 ### Paso 2: Filtrar Objetos COMPLEX Asignados
 

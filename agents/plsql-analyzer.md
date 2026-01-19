@@ -508,6 +508,34 @@ classification = "COMPLEX"  # Usa package state (variables globales)
 reasoning = "Procedure modifica variables de package (g_cache_timestamp, g_cache_data). Package state no existe en PostgreSQL - requiere refactorización."
 ```
 
+**Estrategia de Migración para Packages:**
+
+PostgreSQL usa **SCHEMAS** para simular PACKAGES de Oracle:
+
+```sql
+-- Oracle
+CREATE PACKAGE BODY PKG_VENTAS AS
+  PROCEDURE calcular_total(...) IS ... END;
+  FUNCTION obtener_precio(...) RETURN NUMBER IS ... END;
+END PKG_VENTAS;
+
+-- PostgreSQL (cada package → un schema dedicado)
+CREATE SCHEMA pkg_ventas;
+
+CREATE PROCEDURE pkg_ventas.calcular_total(...)
+LANGUAGE plpgsql AS $$ ... $$;
+
+CREATE FUNCTION pkg_ventas.obtener_precio(...)
+RETURNS NUMERIC LANGUAGE plpgsql AS $$ ... $$;
+```
+
+**Implicaciones para el Análisis:**
+
+1. **Namespace Natural:** `PKG_VENTAS.CALCULAR_TOTAL` → `pkg_ventas.calcular_total`
+2. **Llamadas Internas:** Procedures que llaman otros del mismo package deben usar schema: `pkg_ventas.otro_procedure()`
+3. **Dependencies:** Incluir en análisis que el schema del package debe crearse primero
+4. **Permisos:** Mencionar en recomendaciones que se pueden dar permisos a nivel schema
+
 ### Paso 2: Filtrar Objetos Asignados
 
 Cuando se te asigna procesar "objetos obj_0001 a obj_0010", debes:
