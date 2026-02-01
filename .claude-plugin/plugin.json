@@ -1,6 +1,6 @@
 {
   "name": "oracle-postgres-migration",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Agentes especializados para migrar objetos PL/SQL de Oracle 19c a PostgreSQL 17.4 con análisis semántico, conversión arquitectónica y validación automatizada",
   "author": {
     "name": "Migration Team"
@@ -20,7 +20,7 @@
   "agents": [
     "./agents/plsql-analyzer.md",
     "./agents/plsql-converter.md",
-    "./agents/compilation-validator.md",
+    "./agents/plpgsql-validator.md",
     "./agents/shadow-tester.md"
   ],
   "commands": [

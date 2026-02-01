@@ -50,7 +50,7 @@ export PGSSLMODE=require
 
 1. **Verifica conexión a PostgreSQL**
 2. **Carga scripts SQL migrados** (simple y/o complex según filtro)
-3. **Invoca el agente compilation-validator**
+3. **Invoca el agente plpgsql-validator**
 4. **Ejecuta compilación en PostgreSQL** y captura errores
 5. **Genera reportes de éxito/error**
 
@@ -71,7 +71,7 @@ compilation_results/
 
 **PROMPT DE EJECUCIÓN:**
 
-Voy a ejecutar la **Fase 3: Validación de Compilación** usando el agente `compilation-validator`.
+Voy a ejecutar la **Fase 3: Validación de Compilación** usando el agente `plpgsql-validator`.
 
 **Configuración:**
 - Batch: {{batch}}
@@ -102,10 +102,10 @@ Voy a ejecutar la **Fase 3: Validación de Compilación** usando el agente `comp
    {{/if}}
    - Determinar rango para el batch {{batch}}
 
-3. **Invocar agente compilation-validator**
+3. **Invocar agente plpgsql-validator**
 
    Usaré el Tool `Task` con estas especificaciones:
-   - `subagent_type`: "compilation-validator"
+   - `subagent_type`: "plpgsql-validator"
    - `prompt`: Incluir batch, archivos SQL, credenciales PostgreSQL
    - `description`: "Validar batch {{batch}}"
 

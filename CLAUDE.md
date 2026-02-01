@@ -2,8 +2,8 @@
 
 **Proyecto:** oracle-postgres-migration
 **Tipo:** Plugin de Claude Code
-**Versión:** 1.0.0
-**Última Actualización:** 2026-01-10
+**Versión:** 2.0.0
+**Última Actualización:** 2026-01-31
 
 ---
 
@@ -33,6 +33,26 @@ Este es un **plugin de Claude Code** que proporciona 4 agentes especializados pa
 ### Ejemplos Prácticos
 - **[docs/examples/phase1_launch_example.md](docs/examples/phase1_launch_example.md)** - Ejemplo completo Fase 1
 
+### ⚠️ IMPORTANTE: Política de Documentación Consolidada
+
+**❌ NO CREAR MÁS ARCHIVOS .MD**
+
+La documentación está **consolidada en 3 archivos base:**
+1. **GUIA_MIGRACION.md** - Para usuarios (proceso, fases, comandos, troubleshooting)
+2. **DESARROLLO.md** - Para desarrolladores (arquitectura, diseño, parsing)
+3. **COMANDOS.md** - Referencia rápida de comandos de terminal
+
+**Razón:** Evitar fragmentación y duplicación de información.
+
+**Si necesitas agregar información nueva:**
+- ✅ Integra en uno de los 3 archivos base según audiencia
+- ✅ Actualiza el índice del README.md si es relevante
+- ❌ NO crees archivos como: `ESTRATEGIA_HIBRIDA.md`, `FEATURE_X.md`, `GUIA_Y.md`
+
+**Archivos especiales permitidos (únicos):**
+- `archived/` - Documentos consolidados/obsoletos (con README.md explicativo)
+- `docs/examples/` - Ejemplos prácticos específicos de cada fase
+
 ---
 
 ## 🚀 Instalación y Uso del Plugin
@@ -49,7 +69,7 @@ oracle-postgres-migration/          ← Plugin instalado desde marketplace
 ├── agents/                         ← 4 agentes especializados
 │   ├── plsql-analyzer.md          ← Fase 1: Análisis
 │   ├── plsql-converter.md         ← Fase 2B: Conversión compleja
-│   ├── compilation-validator.md   ← Fase 3: Validación
+│   ├── plpgsql-validator.md   ← Fase 3: Validación
 │   └── shadow-tester.md           ← Fase 4: Testing
 ├── docs/                           ← Documentación técnica
 │   ├── GUIA_MIGRACION.md          ← Para usuarios (proceso completo)
@@ -124,12 +144,12 @@ claude
 - **Estrategias:** AUTONOMOUS_TRANSACTION, UTL_HTTP, UTL_FILE, DBMS_SQL, etc.
 - **Uso:** `Task plsql-converter "Convertir batch_001 objetos complejos 1-10"`
 
-### 3. compilation-validator (Fase 3 - Validación)
+### 3. plpgsql-validator (Fase 3 - Validación)
 - **Propósito:** Validar compilación en PostgreSQL 17.4
 - **Input:** migrated/{simple,complex}/*.sql
 - **Output:** compilation_results/success/, compilation_results/errors/
 - **Conexión:** Requiere PostgreSQL accesible (env vars PGHOST, PGDATABASE, etc.)
-- **Uso:** `Task compilation-validator "Validar batch_001 objetos 1-10"`
+- **Uso:** `Task plpgsql-validator "Validar batch_001 objetos 1-10"`
 
 ### 4. shadow-tester (Fase 4 - Testing Comparativo)
 - **Propósito:** Ejecutar código en Oracle y PostgreSQL, comparar resultados
@@ -148,19 +168,16 @@ claude
 - 42 mensajes para 8,122 objetos
 - Output: knowledge/ + classification/
 
-### FASE 2A: Conversión Simple (30 min - LOCAL)
-- Ejecutar ora2pg localmente (NO usa Claude)
-- ~5,000 objetos SIMPLE
-- Costo tokens: 0 ✅
-
-### FASE 2B: Conversión Compleja (5 horas - 1 sesión)
-- 20 agentes plsql-converter en paralelo
-- ~3,122 objetos COMPLEX
-- 16 mensajes
-- Output: migrated/complex/
+### FASE 2: Conversión Híbrida (5 horas - 1 sesión) ⚡ NUEVO
+- **Orquestación automática:** El agente plsql-converter decide la mejor herramienta por objeto
+- **⚡ ora2pg:** ~5,000 objetos SIMPLE standalone (0 tokens)
+- **🤖 Agente IA:** ~3,122 objetos COMPLEX + packages (~20 mensajes)
+- **Fallback automático:** Si ora2pg falla → Agente IA toma el control
+- **Ahorro:** ~60% en consumo de tokens Claude
+- Output: migrated/simple/ + migrated/complex/
 
 ### FASE 3: Validación de Compilación (5 horas - 1 sesión)
-- 20 agentes compilation-validator en paralelo
+- 20 agentes plpgsql-validator en paralelo
 - Conectan a PostgreSQL y ejecutan scripts
 - 42 mensajes
 - Output: compilation_results/
@@ -171,7 +188,8 @@ claude
 - 84 mensajes
 - Output: shadow_tests/
 
-**Timeline Total:** 25.5 horas efectivas, 184 mensajes, 5-6 sesiones
+**Timeline Total:** 25 horas efectivas, ~188 mensajes, 5 sesiones
+**Ahorro:** ~60% tokens en FASE 2 gracias a estrategia híbrida ora2pg + Agente IA
 
 ---
 

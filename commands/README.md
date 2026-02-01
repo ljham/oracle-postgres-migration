@@ -17,7 +17,7 @@ Este directorio contiene los **slash commands** del plugin que facilitan el uso 
 |------|---------|-------------|-----------------|
 | **1** | `/analyze` | Analiza y clasifica objetos PL/SQL en SIMPLE/COMPLEX | `plsql-analyzer` |
 | **2B** | `/convert` | Convierte objetos COMPLEX con estrategias arquitectónicas | `plsql-converter` |
-| **3** | `/validate` | Valida compilación en PostgreSQL 17.4 | `compilation-validator` |
+| **3** | `/validate` | Valida compilación en PostgreSQL 17.4 | `plpgsql-validator` |
 | **4** | `/test` | Ejecuta shadow testing Oracle vs PostgreSQL | `shadow-tester` |
 
 **Nota:** Fase 2A (conversión SIMPLE) se ejecuta localmente con ora2pg, no usa comandos.

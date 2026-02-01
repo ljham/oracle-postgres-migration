@@ -75,7 +75,7 @@ Problemas:
    - Estrategias por feature Oracle
    - Output: Código PL/pgSQL + Documentación
 
-✅ compilation-validator (Fase 3)
+✅ plpgsql-validator (Fase 3)
    - System prompt especializado en validación
    - Ejecuta en PostgreSQL
    - Captura errores de compilación
@@ -126,7 +126,7 @@ Problemas:
     ├─────────────────────────────────────┤
     │  plsql-analyzer (20 en paralelo)    │
     │  plsql-converter (20 en paralelo)   │
-    │  compilation-validator (20)         │
+    │  plpgsql-validator (20)         │
     │  shadow-tester (10)                 │
     └─────────────┬───────────────────────┘
                   │
@@ -485,7 +485,7 @@ REFERENCIA: 4,049 objetos
    4A. ora2pg (local) → migrated/simple/
    4B. plsql-converter → migrated/complex/
 
-5. VALIDACIÓN (compilation-validator)
+5. VALIDACIÓN (plpgsql-validator)
    ↓
    compilation_results/
 
@@ -537,7 +537,7 @@ Genera un JSON con:
   "agents": [
     "plsql-analyzer",
     "plsql-converter",
-    "compilation-validator",
+    "plpgsql-validator",
     "shadow-tester",
     "performance-analyzer"
   ]

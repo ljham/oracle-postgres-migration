@@ -66,6 +66,8 @@ logs/
 credentials.json
 secrets.yaml
 config.local.yaml
+POSTGRESQL.md
+GEMINI.md
 
 # Datos de migración (archivos grandes de SQL extraído)
 # Estos pertenecen al proyecto del usuario, NO al plugin
@@ -111,3 +113,6 @@ coverage.xml
 # Archivos de progreso (estos se generan dinámicamente)
 progress.json
 manifest.json
+
+# PostgreSQL credentials
+.pg_env
