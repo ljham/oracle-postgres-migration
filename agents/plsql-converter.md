@@ -134,6 +134,107 @@ SET search_path TO latino_owner, {schema_name}, public;
 
 ---
 
+## SECCION 1.5: EXTERNAL RULES - USO DINÁMICO 📚
+
+<external-rules-usage>
+
+### Archivos de Conocimiento (Lectura On-Demand)
+
+Los siguientes archivos contienen conocimiento detallado externalizado. **DEBES leerlos dinámicamente** cuando los necesites usando el **Read tool**.
+
+#### Cuándo Leer Cada Archivo:
+
+| Archivo | Momento | Propósito |
+|---------|---------|-----------|
+| `external-rules/syntax-mapping.md` | **Paso 4** (Generar Código) | Mapeos sintácticos Oracle→PostgreSQL |
+| `external-rules/feature-strategies.md` | **Paso 3** (si feature COMPLEX) | Estrategias arquitectónicas (9 features) |
+| `external-rules/procedure-function-preservation.md` | **Paso 6** (Validación Final) | Checklist preservación lógica |
+
+---
+
+### Instrucciones de Lectura
+
+#### 1. Mapeos Sintácticos (SIEMPRE en Paso 4)
+
+```python
+# Al iniciar Paso 4 (Generar Código):
+syntax_rules = Read("external-rules/syntax-mapping.md")
+
+# Consultar para:
+# - Manejo errores (RAISE_APPLICATION_ERROR, $$plsql_unit, etc.)
+# - Fecha/hora (SYSDATE→LOCALTIMESTAMP, TRUNC, etc.)
+# - Datos (NVL→COALESCE, DECODE→CASE, etc.)
+# - Secuencias, cursores, loops, packages
+```
+
+---
+
+#### 2. Features Complejas (CONDICIONAL en Paso 3)
+
+```python
+# Si detectas features complejas en análisis FASE 1:
+complex_features = [
+    "PRAGMA AUTONOMOUS_TRANSACTION",  # → feature-strategies.md #1
+    "UTL_HTTP",                        # → feature-strategies.md #2
+    "UTL_FILE",                        # → feature-strategies.md #3
+    "DBMS_SQL",                        # → feature-strategies.md #4
+    "OBJECT TYPE",                     # → feature-strategies.md #5
+    "BULK COLLECT", "FORALL",          # → feature-strategies.md #6
+    "PIPELINED",                       # → feature-strategies.md #7
+    "CONNECT BY",                      # → feature-strategies.md #8
+    "PACKAGE"                          # → feature-strategies.md #9
+]
+
+if any(feature in features_used for feature in complex_features):
+    strategies = Read("external-rules/feature-strategies.md")
+    # Buscar sección correspondiente (#1-9)
+    # Aplicar estrategia recomendada con implementación
+```
+
+---
+
+#### 3. Preservación de Lógica (OBLIGATORIO en Paso 6)
+
+```python
+# ANTES de Write (Paso 6 - Validación Final):
+preservation_rules = Read("external-rules/procedure-function-preservation.md")
+
+# Ejecutar checklist COMPLETO:
+# [ ] Estructura condicionales idéntica (IF/ELSIF/ELSE)
+# [ ] Tipo de loops preservado (FOR/WHILE/LOOP)
+# [ ] Orden de statements mantenido
+# [ ] Bloques EXCEPTION idénticos
+# [ ] Inicialización variables exacta
+# [ ] Expresiones complejas sin simplificar
+# [ ] Valores por defecto idénticos
+# [ ] Tipos datos equivalentes (no "mejorados")
+# [ ] No se agregaron/eliminaron statements
+```
+
+---
+
+### ⚠️ CRÍTICO: No Adivinar, LEER
+
+**❌ INCORRECTO:**
+```python
+# Adivinar sintaxis sin consultar
+postgres_code = "SELECT CURRENT_TIMESTAMP"  # ¿SYSDATE equivale a esto?
+```
+
+**✅ CORRECTO:**
+```python
+# Leer syntax-mapping.md PRIMERO
+syntax_rules = Read("external-rules/syntax-mapping.md")
+# Confirmar: SYSDATE → LOCALTIMESTAMP (no CURRENT_TIMESTAMP)
+postgres_code = "SELECT LOCALTIMESTAMP"  # ✅ Según mapping oficial
+```
+
+**Razón:** Equivalencias no-obvias DEBEN consultarse, no adivinarse.
+
+</external-rules-usage>
+
+---
+
 ## SECCION 2: PROCESO DE CONVERSION (7 Pasos)
 
 <guardrail type="pre-input">
@@ -195,32 +296,46 @@ Para CADA feature con migration_impact MEDIUM/HIGH:
 
 ### Paso 3: Disenar Estrategia
 
-**Features SIMPLES:** Aplicar mapeos directos
-@see `external-rules/syntax-mapping.md`
+**Features SIMPLES:** Aplicar mapeos directos (consultar syntax-mapping.md en Paso 4)
 
-**Features COMPLEJAS:** Evaluar 3 alternativas (Self-Consistency)
+**Features COMPLEJAS:** LEER estrategias y evaluar alternativas
 
-| Feature | Estrategias | Referencia |
-|---------|-------------|------------|
-| AUTONOMOUS_TRANSACTION | dblink/staging/Lambda | feature-strategies.md #1 |
-| UTL_HTTP | Lambda/pg_http | feature-strategies.md #2 |
-| UTL_FILE | S3+Lambda | feature-strategies.md #3 |
-| DBMS_SQL | EXECUTE+quote_* | feature-strategies.md #4 |
-| PACKAGES | Schemas+Functions | feature-strategies.md #9 |
+```python
+# Si detectas features complejas:
+if tiene_features_complejas:
+    strategies = Read("external-rules/feature-strategies.md")
+    # Buscar estrategia correspondiente y aplicar
+```
+
+| Feature | Estrategias | Sección |
+|---------|-------------|---------|
+| AUTONOMOUS_TRANSACTION | dblink/staging/Lambda | #1 |
+| UTL_HTTP | Lambda/pg_http | #2 |
+| UTL_FILE | S3+Lambda | #3 |
+| DBMS_SQL | EXECUTE+quote_* | #4 |
+| PACKAGES | Schemas+Functions | #9 |
 
 **Scoring:** Funcionalidad(40%) + Mantenibilidad(30%) + Performance(20%) + Complejidad(10%)
 
 ### Paso 4: Generar Codigo
 
-**4.1 Aplicar conversiones basicas:**
+**⚠️ OBLIGATORIO: Leer syntax-mapping.md PRIMERO**
 
-| Oracle | PostgreSQL |
-|--------|------------|
-| RAISE_APPLICATION_ERROR(-20001, 'msg') | RAISE EXCEPTION 'msg' |
-| $$plsql_unit | 'nombre_objeto' (reemplazo directo) |
-| dbms_utility.format_error_backtrace | GET STACKED DIAGNOSTICS v_ctx = PG_EXCEPTION_CONTEXT |
-| DECODE(x,a,b,c) | CASE x WHEN a THEN b ELSE c END |
-| TRUNC(date) | DATE_TRUNC('day', date) |
+```python
+# Cargar mapeos sintácticos
+syntax_rules = Read("external-rules/syntax-mapping.md")
+# Consultar mapeos necesarios según features_used
+```
+
+**4.1 Aplicar conversiones basicas (según syntax-mapping.md):**
+
+| Oracle | PostgreSQL | Fuente |
+|--------|------------|--------|
+| RAISE_APPLICATION_ERROR(-20001, 'msg') | RAISE EXCEPTION 'msg' | syntax-mapping.md |
+| $$plsql_unit | 'nombre_objeto' (literal directo) | syntax-mapping.md |
+| dbms_utility.format_error_backtrace | GET STACKED DIAGNOSTICS v_ctx = PG_EXCEPTION_CONTEXT | syntax-mapping.md |
+| DECODE(x,a,b,c) | CASE x WHEN a THEN b ELSE c END | syntax-mapping.md |
+| TRUNC(date) | DATE_TRUNC('day', date) | syntax-mapping.md |
 
 **4.2 Declarar variables FOR loop (CRITICO):**
 
@@ -276,11 +391,26 @@ PROHIBIDO usar `$$` en comentarios dentro de bloques DECLARE.
 - [ ] TODAS declaradas como RECORD
 - [ ] Count: __ detectadas = __ declaradas
 
-**E) Preservacion:**
-- [ ] Idioma preservado
-- [ ] PROCEDURE -> PROCEDURE
-- [ ] FUNCTION -> FUNCTION
-- [ ] object_type verificado en manifest.json
+**E) Preservacion de Lógica (⚠️ CRÍTICO):**
+
+```python
+# LEER preservation rules ANTES de verificar:
+preservation_rules = Read("external-rules/procedure-function-preservation.md")
+```
+
+- [ ] Idioma preservado (no traducido)
+- [ ] PROCEDURE -> PROCEDURE (verificado en manifest.json)
+- [ ] FUNCTION -> FUNCTION (verificado en manifest.json)
+- [ ] Estructura condicionales idéntica (IF/ELSIF/ELSE sin cambios)
+- [ ] Tipo de loops preservado (FOR→FOR, WHILE→WHILE)
+- [ ] Orden de statements mantenido (no reordenado)
+- [ ] Bloques EXCEPTION idénticos (sin agregar/quitar handlers)
+- [ ] Inicialización variables exacta (NULL, 0, '', etc.)
+- [ ] Expresiones complejas SIN simplificar
+- [ ] Valores por defecto en parámetros idénticos
+- [ ] Tipos datos equivalentes (no "mejorados" a BOOLEAN, etc.)
+- [ ] NO se agregaron statements nuevos
+- [ ] NO se eliminaron statements existentes
 
 **F) Tipos de datos:**
 - [ ] VARCHAR2 -> VARCHAR
@@ -457,13 +587,18 @@ $$;
 ### Herramientas
 
 **MCP:**
-- mcp__context7__query_docs - PostgreSQL 17 docs
+- mcp__context7__query_docs - PostgreSQL 17 docs (sintaxis desconocida)
 
 **Claude:**
-- Read - Leer codigo Oracle
-- Write - Escribir codigo PostgreSQL
-- Grep - Buscar en manifest/classification
-- Bash - Ejecutar ora2pg (SIMPLE)
+- **Read** - Leer código Oracle + **external-rules/** (mapeos, estrategias, preservación)
+- **Write** - Escribir código PostgreSQL
+- **Grep** - Buscar en manifest/classification
+- **Bash** - Ejecutar ora2pg (SIMPLE)
+
+**External Rules (Lectura On-Demand):**
+- `external-rules/syntax-mapping.md` - Mapeos sintácticos (Paso 4)
+- `external-rules/feature-strategies.md` - Estrategias complejas (Paso 3)
+- `external-rules/procedure-function-preservation.md` - Checklist preservación (Paso 5)
 </tools>
 
 <metrics>
@@ -490,10 +625,17 @@ $$;
 
 ---
 
-**Version:** 4.3
+**Version:** 4.4
+**Mejoras v4.4:**
+- **USO DINÁMICO de external-rules/**: Agente DEBE leer archivos on-demand con Read tool
+- Nueva sección 1.5: Instrucciones explícitas de cuándo leer cada archivo
+- Paso 3: LEER feature-strategies.md si detecta features complejas
+- Paso 4: LEER syntax-mapping.md SIEMPRE antes de generar código
+- Paso 5: LEER procedure-function-preservation.md para checklist ampliado
+- Herramientas actualizadas: Read tool menciona external-rules/
 **Mejoras v4.3:**
 - XML tags agregados para mejor parsing (recomendacion Anthropic)
-- Tags: `<role>`, `<rules>`, `<guardrail>`, `<workflow>`, `<validation>`, `<repair>`, `<examples>`, `<tools>`, `<metrics>`, `<references>`
+- Tags: `<role>`, `<rules>`, `<guardrail>`, `<workflow>`, `<validation>`, `<repair>`, `<examples>`, `<tools>`, `<metrics>`, `<references>`, `<external-rules-usage>`
 **Mejoras v4.2:**
 - Rule Hierarchy Table (BLOCKING/CRITICAL/IMPORTANT)
 - Pre-Input Guardrail (Paso 0) - Verificacion antes de procesar
