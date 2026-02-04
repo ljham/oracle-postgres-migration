@@ -55,6 +55,94 @@ La documentación está **consolidada en 3 archivos base:**
 
 ---
 
+## 📝 Política de Creación de Archivos (Evitar Desorden)
+
+**ACTUALIZADO:** 2026-02-02
+
+### ⚠️ REGLA GENERAL: Solo crear archivos .md cuando aporten valor a largo plazo
+
+**Problema identificado:** Se creaban demasiados archivos .md temporales de resúmenes, correcciones y análisis que solo agregaban desorden al proyecto.
+
+### ❌ NO Crear Archivos .md Para:
+
+- **Resúmenes de cambios o correcciones** → Mostrar en pantalla, usuario decide si guardar
+- **Resultados de tests intermedios** → Mostrar en pantalla
+- **Análisis temporales** → Mostrar en pantalla
+- **Correcciones puntuales** → Mostrar en pantalla
+- **Updates de versiones** → Usar CHANGELOG.md (centralizado)
+
+**Excepciones:**
+- Si el usuario solicita explícitamente: "crea un archivo con este resumen"
+- Si es documentación técnica permanente (ver siguiente sección)
+
+### ✅ SÍ Crear Archivos .md Para:
+
+- **Documentación técnica permanente:**
+  - GUIA_MIGRACION.md - Proceso de migración
+  - DESARROLLO.md - Arquitectura del plugin
+  - COMANDOS.md - Referencia de comandos
+  - README.md - Índice principal
+
+- **Referencias de decisiones arquitectónicas importantes:**
+  - Cuando una decisión afecta diseño a largo plazo
+  - Cuando requiere consulta frecuente por otros desarrolladores
+
+- **Backups antes de modificaciones críticas:**
+  - `agents/backups/agente.md.vX.X.X` - Siempre crear backup antes de editar agentes
+
+- **Cuando el usuario lo solicita explícitamente:**
+  - "Crea un documento con..."
+  - "Guarda esto en un archivo..."
+
+### 📊 Alternativas Recomendadas:
+
+**Para cambios y updates:**
+- **CHANGELOG.md** - Historial centralizado de todas las versiones
+- **Git commits** - Mensajes descriptivos con detalles técnicos
+- **Conversación de Claude** - El historial ya tiene toda la info
+
+**Para análisis y resúmenes:**
+- **Mostrar en pantalla** - Output directo en la conversación
+- **Usuario decide** - Preguntar: "¿Quieres que guarde esto en un archivo?"
+
+### 🗑️ Limpieza de Archivos Temporales:
+
+**Proceso aplicado (2026-02-02):**
+```bash
+# Archivos temporales movidos a archived/temp-docs-2026-02-02/
+- ACTUALIZACIONES_FRAMEWORK_v3.3.2_FINAL.md
+- PATH_CORRECTION_v3.3.2.md
+- TEST_VALIDATION_V3.1_RESULTS.md
+- TEST_PLSQL_UNIT_RULE_UPDATE.md
+- ULTRA_MINIMALISTA_RESULTS.md
+- ANALISIS_INTEGRACION_FASE1_FASE2.md
+- MEJORA_V3.2_INTEGRACION_FASE1_FASE2.md
+- SOLUTION_C_IMPLEMENTED.md
+
+Total: 8 archivos → archived/
+```
+
+**Resultado:** Directorio raíz más limpio y organizado.
+
+### 💡 Workflow Recomendado para Claude:
+
+1. **Al hacer cambios:**
+   - Crear backup si modificas archivo crítico
+   - Actualizar CHANGELOG.md con el cambio
+   - Mostrar resumen en pantalla
+   - **NO crear archivo .md de resumen automáticamente**
+
+2. **Al finalizar:**
+   - Preguntar: "¿Quieres que cree un documento con el resumen de cambios?"
+   - Si usuario dice sí → crear archivo
+   - Si usuario dice no → dejar solo en conversación
+
+3. **Commits de git:**
+   - Mensajes descriptivos que documenten el cambio
+   - Ejemplo: `fix(plsql-converter): corregir paths sql/migrated/ → migrated/`
+
+---
+
 ## 🚀 Instalación y Uso del Plugin
 
 ### Estructura del Plugin
@@ -87,7 +175,7 @@ oracle-postgres-migration/          ← Plugin instalado desde marketplace
 ### Estructura de tu Proyecto
 
 ```
-phantomx-nexus/                     ← Tu proyecto con datos
+<nombre-proyecto>/                  ← Tu proyecto con datos
 ├── sql/extracted/                  ← Archivos fuente PL/SQL
 │   ├── functions.sql
 │   ├── procedures.sql
@@ -98,7 +186,7 @@ phantomx-nexus/                     ← Tu proyecto con datos
 │   └── progress.json              ← Generado por prepare_migration.py
 ├── knowledge/                      ← Generado por agentes
 ├── migrated/                       ← Código convertido
-├── compilation_results/            ← Resultados de validación
+├── compilation/                    ← Resultados de validación
 └── shadow_tests/                   ← Resultados de testing
 ```
 
@@ -109,13 +197,13 @@ phantomx-nexus/                     ← Tu proyecto con datos
 # Ir a Claude Code → Marketplace → Buscar "oracle-postgres-migration" → Install
 
 # 2. Navegar al proyecto con datos
-cd /home/ljham/Documentos/desarrollo/PythonProjects/phantomx-nexus
+cd /ruta/a/<nombre-proyecto>
 
 # 3. Iniciar Claude Code (el plugin se carga automáticamente)
 claude
 
 # Claude Code carga automáticamente los 4 agentes del plugin instalado
-# Los agentes trabajan con archivos en el directorio actual (phantomx-nexus/)
+# Los agentes trabajan con archivos en el directorio actual (<nombre-proyecto>/)
 # Los outputs se guardan en knowledge/, migrated/, etc.
 ```
 
@@ -147,16 +235,122 @@ claude
 ### 3. plpgsql-validator (Fase 3 - Validación)
 - **Propósito:** Validar compilación en PostgreSQL 17.4
 - **Input:** migrated/{simple,complex}/*.sql
-- **Output:** compilation_results/success/, compilation_results/errors/
+- **Output:** compilation/success/, compilation/errors/
 - **Conexión:** Requiere PostgreSQL accesible (env vars PGHOST, PGDATABASE, etc.)
 - **Uso:** `Task plpgsql-validator "Validar batch_001 objetos 1-10"`
 
 ### 4. shadow-tester (Fase 4 - Testing Comparativo)
 - **Propósito:** Ejecutar código en Oracle y PostgreSQL, comparar resultados
-- **Input:** compilation_results/success/*.log
+- **Input:** compilation/success/*.log
 - **Output:** shadow_tests/*.json (comparaciones)
 - **Conexión:** Requiere Oracle + PostgreSQL accesibles
 - **Uso:** `Task shadow-tester "Testear batch_001 objetos 1-5"`
+
+---
+
+## 🎯 Marco de Trabajo y Optimizaciones (IMPORTANTE)
+
+**Versión del Framework:** 3.2.1 - Optimizado con Anthropic Best Practices
+**Última Actualización:** 2026-02-03
+
+### Principios de Diseño Establecidos
+
+**TODA modificación futura a los agentes DEBE seguir estos principios:**
+
+#### 1. **Prompt Engineering - Anthropic Best Practices**
+- ✅ **XML Tags como estándar estructural** (recomendación oficial de Anthropic)
+  - Uso de `<role>`, `<rules>`, `<workflow>`, `<classification>`, `<examples>`, etc.
+  - Proporciona estructura semántica clara sin overhead de procesamiento
+  - "Most Claude-y approach" según Anthropic documentation
+- ✅ **Structured CoT (Chain of Thought)** para razonamiento paso a paso
+- ✅ **ReAct Pattern** para decisiones y acciones
+- ✅ **CAPR (Conversational Repair)** para feedback loops
+- ✅ **Context7 Integration** para consultas de documentación en tiempo real
+
+#### 2. **Política Anti-Prompt Bloat**
+- ⚠️ **CRÍTICO:** Evitar prompts extensos que causen pérdida de memoria del modelo
+- ✅ **Minimalismo enfocado:** Solo información ESENCIAL para la tarea
+- ✅ **Eliminar verbosidad:** Sin documentación extensa dentro de prompts
+- ✅ **Ejemplos concisos:** 3 ejemplos claros > 6 ejemplos extensos
+- ✅ **Target:** Mantener agentes entre 500-700 líneas (máximo)
+- ❌ **Prohibido:** Agregar secciones de reportes, tracking detallado, o ejemplos redundantes
+
+**Razón:** Prompts extensos (>2,000 líneas) causan:
+- Pérdida de foco del modelo (attention dilution)
+- Procesamiento más lento
+- Menor precisión en la ejecución de tareas
+
+#### 3. **Idioma y Consistencia**
+- ✅ **Español para todos los system prompts de agentes** (decisión de equipo)
+- ✅ **Código en inglés** (nombres de variables, funciones, clases)
+- ✅ **Términos técnicos sin traducir** (endpoint, hook, batch, feedback loop)
+- ✅ **Documentación externa en español** (README, GUIA_MIGRACION, DESARROLLO)
+
+**Razón:** Español mejora comprensión para el equipo, inglés mantiene estándares de código internacional.
+
+#### 4. **Versionamiento y Backups Obligatorios**
+- ✅ **SIEMPRE crear backup antes de modificar un agente**
+  - Formato: `agents/backups/{agente}.md.v{X.Y}.{descripcion}.backup`
+  - Ejemplo: `plpgsql-validator.md.v3.2.pre-path-fix.backup`
+- ✅ **Actualizar CHANGELOG.md** con cada cambio significativo
+- ✅ **Versión semántica:**
+  - Major (X.0): Cambios arquitectónicos o de estructura
+  - Minor (X.Y): Nuevas features o mejoras
+  - Patch (X.Y.Z): Correcciones de bugs o ajustes menores
+
+#### 5. **Herramientas Probadas en Migración Oracle→PostgreSQL**
+- ✅ **ora2pg:** Conversión batch de objetos SIMPLE (estándar de industria)
+- ✅ **Context7:** Consulta de docs PostgreSQL 17.4 en tiempo real
+- ✅ **Kahn's Algorithm:** Compilación por niveles de dependencia (topological sort)
+- ✅ **Feedback Loops:** Retry automático con plsql-converter para errores COMPLEX
+- ✅ **Auto-corrección limitada:** Máximo 3 intentos para errores sintácticos simples
+
+### Versiones Actuales de Agentes (Optimizadas)
+
+| Agente | Versión | Líneas | Características Clave |
+|--------|---------|--------|----------------------|
+| **plsql-analyzer** | v4.6 | 632 | Español + XML tags, clasificación SIMPLE/COMPLEX |
+| **plsql-converter** | v4.3.1 | 502 | Español + 12 XML tags, estrategias híbridas, feedback loop |
+| **plpgsql-validator** | v3.2.1 | 654 | Compilación por niveles, auto-corrección (máx 3), feedback loop |
+| **shadow-tester** | v1.0.1 | ~400 | Comparación Oracle vs PostgreSQL |
+
+**Reducción Total:** ~40% menos líneas vs versiones originales sin pérdida de funcionalidad.
+
+### Técnicas Aplicadas
+
+**Optimizaciones implementadas (2026-01 a 2026-02):**
+1. **v3.0:** Agregado de XML tags (estructura semántica)
+2. **v3.1:** Reducción drástica 68% (2,064 → 577 líneas en plpgsql-validator)
+3. **v3.2:** Integración de compilación por niveles (topological sort)
+4. **v3.2.1:** Corrección de paths (compilation_results → compilation)
+5. **v4.3:** Español + XML tags en plsql-converter
+6. **v4.6:** Español + XML tags en plsql-analyzer
+
+### Directrices para Futuras Modificaciones
+
+**ANTES de modificar cualquier agente:**
+1. ✅ Crear backup con versionamiento claro
+2. ✅ Leer CHANGELOG.md para entender historial
+3. ✅ Verificar que el cambio no viola política anti-prompt bloat
+4. ✅ Mantener XML tags como estructura (no eliminar)
+5. ✅ Mantener idioma español en prompts
+6. ✅ Actualizar CHANGELOG.md con la modificación
+7. ✅ Validar que el cambio sigue Anthropic best practices
+
+**RECHAZAR cambios que:**
+- ❌ Agreguen >100 líneas sin justificación técnica clara
+- ❌ Introduzcan verbosidad innecesaria (ejemplos extensos, documentación inline)
+- ❌ Eliminen XML tags (estructura semántica crítica)
+- ❌ Cambien idioma a inglés sin consenso de equipo
+- ❌ No incluyan backup ni actualización de CHANGELOG
+
+### Referencias de Documentación
+
+**Para optimizaciones futuras consultar:**
+- `CHANGELOG.md` - Historial completo de versiones y cambios
+- `agents/backups/` - Todas las versiones anteriores de agentes
+- `docs/DESARROLLO.md` - Arquitectura técnica y decisiones de diseño
+- [Anthropic Prompt Engineering Guide](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) - Best practices oficiales
 
 ---
 
@@ -180,7 +374,7 @@ claude
 - 20 agentes plpgsql-validator en paralelo
 - Conectan a PostgreSQL y ejecutan scripts
 - 42 mensajes
-- Output: compilation_results/
+- Output: compilation/
 
 ### FASE 4: Shadow Testing (10 horas - 2 sesiones)
 - 10 agentes shadow-tester en paralelo
@@ -244,7 +438,7 @@ Ver detalles: **[docs/GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md)** - Sección "S
 # Claude Code → Marketplace → "oracle-postgres-migration" → Install
 
 # 2. Navegar al proyecto con datos
-cd /home/ljham/Documentos/desarrollo/PythonProjects/phantomx-nexus
+cd /ruta/a/<nombre-proyecto>
 
 # 3. Verificar archivos fuente Oracle
 ls sql/extracted/*.sql
@@ -256,12 +450,12 @@ cp ~/.claude/plugins/oracle-postgres-migration/scripts/prepare_migration.py scri
 
 # 5. Generar manifest, progress y estructura de directorios (solo primera vez)
 # IMPORTANTE: Ejecutar DESDE tu proyecto, el script usa Path.cwd()
-# El script crea automáticamente: knowledge/, migrated/, compilation_results/, shadow_tests/
+# El script crea automáticamente: knowledge/, migrated/, compilation/, shadow_tests/
 python scripts/prepare_migration.py
 
 # 6. Verificar que todo se creó correctamente
 ls -la sql/extracted/manifest.json sql/extracted/progress.json
-ls -la knowledge/ migrated/ compilation_results/ shadow_tests/
+ls -la knowledge/ migrated/ compilation/ shadow_tests/
 
 # 7. Iniciar Claude Code (el plugin se carga automáticamente)
 claude
@@ -301,7 +495,7 @@ claude plugins list | grep oracle-postgres-migration
 
 ### Agentes no encuentran archivos
 ```bash
-pwd  # Debe ser phantomx-nexus
+pwd  # Debe ser <nombre-proyecto>
 ls sql/extracted/*.sql
 ```
 
@@ -377,11 +571,21 @@ Ver `archived/README.md` para detalles completos.
 
 **Contexto clave a recordar:**
 - Este es un PLUGIN instalado desde marketplace, no parte del proyecto del usuario
-- Los datos están en el proyecto del usuario (ej: phantomx-nexus/), no en el plugin
+- Los datos están en el proyecto del usuario (ej: <nombre-proyecto>/), no en el plugin
 - Los agentes trabajan con el CWD (directorio del proyecto), no con la ubicación del plugin
 - Usar rutas relativas desde el directorio del proyecto cuando invoques agentes
 - El usuario debe copiar los scripts (prepare_migration.py, update_progress.py) a su proyecto
 - Documentación en español, código en inglés
+
+**⚠️ CRÍTICO - Marco de Trabajo de Optimización:**
+- **LEER OBLIGATORIO:** Sección "🎯 Marco de Trabajo y Optimizaciones" en este archivo
+- **Versiones actuales:** plsql-analyzer v4.6, plsql-converter v4.3.1, plpgsql-validator v3.2.1
+- **ANTES de modificar agentes:** Crear backup + seguir principios establecidos
+- **Política anti-prompt bloat:** Mantener agentes entre 500-700 líneas máximo
+- **XML tags obligatorios:** No eliminar estructura semántica
+- **Idioma español:** Todos los system prompts en español (decisión de equipo)
+- **Actualizar CHANGELOG.md:** Con cada modificación significativa
+- **Consultar:** `CHANGELOG.md` para historial completo de optimizaciones
 
 **Estructura de Documentación (Consolidada 2026-01-10):**
 - **Organizada por AUDIENCIA**, no por tema
@@ -396,10 +600,17 @@ Ver `archived/README.md` para detalles completos.
 3. **Comandos/troubleshooting** → `COMANDOS.md`
 4. **Parsing/validación** → `DESARROLLO.md` (sección Sistema de Parsing)
 5. **Sistema de progreso** → `GUIA_MIGRACION.md` (sección Sistema de Progreso y Reanudación)
+6. **Optimizaciones/marco de trabajo** → Sección "🎯 Marco de Trabajo y Optimizaciones" en este archivo
+7. **Historial de cambios** → `CHANGELOG.md`
 
 ---
 
-**Última Actualización:** 2026-01-10
-**Versión:** 1.0.0
-**Estado:** Documentación consolidada, parsing validado (90.2% valid), listo para migración
+**Última Actualización:** 2026-02-03
+**Versión Framework:** 3.2.1 (Agentes optimizados con Anthropic best practices)
+**Estado:**
+- ✅ Agentes optimizados (v3.2.1, v4.3.1, v4.6)
+- ✅ Paths corregidos (compilation/ unificado)
+- ✅ Marco de trabajo establecido
+- ✅ Documentación consolidada
+- ✅ Listo para migración
 **Próximo Paso:** Ver [README.md](README.md) → [GUIA_MIGRACION.md](docs/GUIA_MIGRACION.md) → Iniciar Fase 1

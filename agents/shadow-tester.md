@@ -9,7 +9,7 @@ description: |
   **Usa este agente cuando:** Todos los objetos han compilado exitosamente y necesitas validar
   que el comportamiento PostgreSQL coincide exactamente con el comportamiento Oracle.
 
-  **Input:** Objetos compilados exitosamente desde compilation_results/success/
+  **Input:** Objetos compilados exitosamente desde compilation/success/
   **Output:** Resultados shadow test con comparaciones (PASS/FAIL/DISCREPANCY)
 
   **Procesamiento por lotes:** Testea 10 objetos por instancia agente. Lanza 10 agentes en paralelo
