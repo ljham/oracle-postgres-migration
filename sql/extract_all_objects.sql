@@ -1,10 +1,19 @@
--- extract_all_objects.sql
--- Script optimizado para extraer objetos de Oracle a archivos SQL utilizando la herramienta sqlplus
--- Ejecutar en SQL*Plus o SQL Developer
+-- extract_all_objects.sql (v3)
+-- Script para extraer objetos de Oracle a archivos SQL
 --
--- Uso:
---   1. Ingresar a la ruta y ejecutar el comando sqlplus usuario/password@db @extract_all_objects.sql
---   2. sqlplus latino_migracion/latino_migracion123@AWS_BD_TEST @extract_all_objects.sql
+-- CAMBIOS v3:
+--   ✅ USA ALL_SOURCE con SELECT directo (evita partición de identificadores)
+--   ✅ AGREGA delimitador / automáticamente entre objetos
+--   ✅ Preserva código fuente EXACTO tal como fue compilado
+--   ✅ Compatible con prepare_migration_v4.py (parsing granular)
+--   ✅ Mantiene DBMS_METADATA para TABLES, CONSTRAINTS, SEQUENCES
+--
+-- Ejecutar con charset UTF-8:
+--   bash extract_with_utf8.sh
+--
+-- O manualmente:
+--   export NLS_LANG=AMERICAN_AMERICA.AL32UTF8
+--   sqlplus latino_migracion/latino_migracion123@AWS_BD_TEST @extract_all_objects.sql
 --
 
 SET LONG 100000000
@@ -15,13 +24,303 @@ SET HEADING OFF
 SET FEEDBACK OFF
 SET VERIFY OFF
 SET TRIMSPOOL ON
-SET TIMING ON
+SET TIMING OFF
 SET SERVEROUTPUT ON SIZE UNLIMITED
 
 -- Crear directorio de salida
 !mkdir -p extracted
 
--- Configurar DBMS_METADATA para formato limpio
+PROMPT =====================================================
+PROMPT Extraccion v3 - ALL_SOURCE + Delimitadores automaticos
+PROMPT - Codigo fuente EXACTO (sin particion de identificadores)
+PROMPT - Delimitador / agregado entre objetos
+PROMPT - Compatible con prepare_migration_v4.py
+PROMPT =====================================================
+
+-- =====================================================
+-- METADATA DE OBJETOS (Archivo separado con info de compilación)
+-- =====================================================
+PROMPT Generando metadata.json...
+SPOOL extracted/metadata.json
+
+SELECT '[' FROM dual;
+
+-- FUNCTIONS metadata
+SELECT
+    CASE
+        WHEN ROW_NUMBER() OVER (ORDER BY owner, name) > 1 THEN ','
+        ELSE ''
+    END ||
+    '{' ||
+    '"schema":"' || owner || '",' ||
+    '"object_name":"' || name || '",' ||
+    '"object_type":"FUNCTION",' ||
+    '"source_file":"functions.sql",' ||
+    '"last_ddl_time":"' || TO_CHAR((SELECT last_ddl_time FROM all_objects o WHERE o.owner = s.owner AND o.object_name = s.name AND o.object_type = 'FUNCTION'), 'YYYY-MM-DD HH24:MI:SS') || '",' ||
+    '"lines_of_code":' || MAX(line) ||
+    '}'
+FROM all_source s
+WHERE type = 'FUNCTION'
+  AND owner IN ('LATINO_PLSQL')
+GROUP BY owner, name
+ORDER BY owner, name;
+
+-- PROCEDURES metadata
+SELECT
+    ',' ||
+    '{' ||
+    '"schema":"' || owner || '",' ||
+    '"object_name":"' || name || '",' ||
+    '"object_type":"PROCEDURE",' ||
+    '"source_file":"procedures.sql",' ||
+    '"last_ddl_time":"' || TO_CHAR((SELECT last_ddl_time FROM all_objects o WHERE o.owner = s.owner AND o.object_name = s.name AND o.object_type = 'PROCEDURE'), 'YYYY-MM-DD HH24:MI:SS') || '",' ||
+    '"lines_of_code":' || MAX(line) ||
+    '}'
+FROM all_source s
+WHERE type = 'PROCEDURE'
+  AND owner IN ('LATINO_PLSQL')
+GROUP BY owner, name
+ORDER BY owner, name;
+
+-- PACKAGE SPEC metadata
+SELECT
+    ',' ||
+    '{' ||
+    '"schema":"' || owner || '",' ||
+    '"object_name":"' || name || '",' ||
+    '"object_type":"PACKAGE_SPEC",' ||
+    '"source_file":"packages_spec.sql",' ||
+    '"last_ddl_time":"' || TO_CHAR((SELECT last_ddl_time FROM all_objects o WHERE o.owner = s.owner AND o.object_name = s.name AND o.object_type = 'PACKAGE'), 'YYYY-MM-DD HH24:MI:SS') || '",' ||
+    '"lines_of_code":' || MAX(line) ||
+    '}'
+FROM all_source s
+WHERE type = 'PACKAGE'
+  AND owner IN ('LATINO_PLSQL')
+  AND name != 'ORA_EXCEL'
+GROUP BY owner, name
+ORDER BY owner, name;
+
+-- PACKAGE BODY metadata
+SELECT
+    ',' ||
+    '{' ||
+    '"schema":"' || owner || '",' ||
+    '"object_name":"' || name || '",' ||
+    '"object_type":"PACKAGE_BODY",' ||
+    '"source_file":"packages_body.sql",' ||
+    '"last_ddl_time":"' || TO_CHAR((SELECT last_ddl_time FROM all_objects o WHERE o.owner = s.owner AND o.object_name = s.name AND o.object_type = 'PACKAGE BODY'), 'YYYY-MM-DD HH24:MI:SS') || '",' ||
+    '"lines_of_code":' || MAX(line) ||
+    '}'
+FROM all_source s
+WHERE type = 'PACKAGE BODY'
+  AND owner IN ('LATINO_PLSQL')
+  AND name != 'ORA_EXCEL'
+GROUP BY owner, name
+ORDER BY owner, name;
+
+-- TRIGGERS metadata
+SELECT
+    ',' ||
+    '{' ||
+    '"schema":"' || s.owner || '",' ||
+    '"object_name":"' || s.name || '",' ||
+    '"object_type":"TRIGGER",' ||
+    '"source_file":"triggers.sql",' ||
+    '"table_name":"' || t.table_owner || '.' || t.table_name || '",' ||
+    '"trigger_type":"' || t.trigger_type || '",' ||
+    '"triggering_event":"' || t.triggering_event || '",' ||
+    '"last_ddl_time":"' || TO_CHAR((SELECT last_ddl_time FROM all_objects o WHERE o.owner = s.owner AND o.object_name = s.name AND o.object_type = 'TRIGGER'), 'YYYY-MM-DD HH24:MI:SS') || '",' ||
+    '"lines_of_code":' || MAX(s.line) ||
+    '}'
+FROM all_source s
+INNER JOIN all_triggers t ON s.owner = t.owner AND s.name = t.trigger_name
+WHERE s.type = 'TRIGGER'
+  AND s.owner IN ('LATINO_OWNER')
+GROUP BY s.owner, s.name, t.table_owner, t.table_name, t.trigger_type, t.triggering_event
+ORDER BY s.owner, t.table_name, s.name;
+
+-- JAVA SOURCE metadata
+SELECT
+    ',' ||
+    '{' ||
+    '"schema":"' || owner || '",' ||
+    '"object_name":"' || name || '",' ||
+    '"object_type":"JAVA_SOURCE",' ||
+    '"source_file":"java_sources.sql",' ||
+    '"last_ddl_time":"' || TO_CHAR((SELECT last_ddl_time FROM all_objects o WHERE o.owner = s.owner AND o.object_name = s.name AND o.object_type = 'JAVA SOURCE'), 'YYYY-MM-DD HH24:MI:SS') || '",' ||
+    '"lines_of_code":' || MAX(line) || ',' ||
+    '"note":"Migrar a PL/pgSQL, Python o Java externo en PostgreSQL"' ||
+    '}'
+FROM all_source s
+WHERE type = 'JAVA SOURCE'
+  AND owner IN ('LATINO_PLSQL')
+GROUP BY owner, name
+ORDER BY owner, name;
+
+SELECT ']' FROM dual;
+
+SPOOL OFF
+
+-- =====================================================
+-- FUNCIONES (ALL_SOURCE + delimitador / automático)
+-- =====================================================
+PROMPT Extrayendo FUNCTIONS...
+SPOOL extracted/functions.sql
+
+SET SERVEROUTPUT OFF
+
+-- Agregar delimitador / entre objetos
+SELECT
+    CASE
+        -- Detectar cambio de función: agregar / antes del nuevo objeto
+        WHEN LAG(name) OVER (ORDER BY owner, name, line) IS NOT NULL
+             AND LAG(name) OVER (ORDER BY owner, name, line) != name THEN
+            '/' || CHR(10) || text
+        -- Primera línea del archivo o líneas normales
+        ELSE
+            text
+    END AS text
+FROM all_source
+WHERE type = 'FUNCTION'
+  AND owner IN ('LATINO_PLSQL')
+ORDER BY owner, name, line;
+
+-- Agregar delimitador final después de la última función
+SELECT '/' || CHR(10) FROM dual;
+
+SPOOL OFF
+
+-- =====================================================
+-- PROCEDIMIENTOS (ALL_SOURCE + delimitador / automático)
+-- =====================================================
+PROMPT Extrayendo PROCEDURES...
+SPOOL extracted/procedures.sql
+
+-- Agregar delimitador / entre objetos
+SELECT
+    CASE
+        -- Detectar cambio de procedure: agregar / antes del nuevo objeto
+        WHEN LAG(name) OVER (ORDER BY owner, name, line) IS NOT NULL
+             AND LAG(name) OVER (ORDER BY owner, name, line) != name THEN
+            '/' || CHR(10) || text
+        -- Primera línea del archivo o líneas normales
+        ELSE
+            text
+    END AS text
+FROM all_source
+WHERE type = 'PROCEDURE'
+  AND owner IN ('LATINO_PLSQL')
+ORDER BY owner, name, line;
+
+-- Agregar delimitador final
+SELECT '/' || CHR(10) FROM dual;
+
+SPOOL OFF
+
+-- =====================================================
+-- PACKAGES SPEC (ALL_SOURCE + delimitador / automático)
+-- =====================================================
+PROMPT Extrayendo PACKAGE SPECS...
+SPOOL extracted/packages_spec.sql
+
+-- Agregar delimitador / entre objetos
+SELECT
+    CASE
+        -- Detectar cambio de package: agregar / antes del nuevo objeto
+        WHEN LAG(name) OVER (ORDER BY owner, name, line) IS NOT NULL
+             AND LAG(name) OVER (ORDER BY owner, name, line) != name THEN
+            '/' || CHR(10) || text
+        -- Primera línea del archivo o líneas normales
+        ELSE
+            text
+    END AS text
+FROM all_source
+WHERE type = 'PACKAGE'
+  AND owner IN ('LATINO_PLSQL')
+  AND name != 'ORA_EXCEL'  -- Excluir librería ORA_EXCEL (no migrable a PostgreSQL)
+ORDER BY owner, name, line;
+
+-- Agregar delimitador final
+SELECT '/' || CHR(10) FROM dual;
+
+SPOOL OFF
+
+-- =====================================================
+-- PACKAGES BODY (ALL_SOURCE + delimitador / automático)
+-- =====================================================
+PROMPT Extrayendo PACKAGE BODIES...
+SPOOL extracted/packages_body.sql
+
+-- Agregar delimitador / entre objetos
+SELECT
+    CASE
+        -- Detectar cambio de package body: agregar / antes del nuevo objeto
+        WHEN LAG(name) OVER (ORDER BY owner, name, line) IS NOT NULL
+             AND LAG(name) OVER (ORDER BY owner, name, line) != name THEN
+            '/' || CHR(10) || text
+        -- Primera línea del archivo o líneas normales
+        ELSE
+            text
+    END AS text
+FROM all_source
+WHERE type = 'PACKAGE BODY'
+  AND owner IN ('LATINO_PLSQL')
+  AND name != 'ORA_EXCEL'  -- Excluir librería ORA_EXCEL (no migrable a PostgreSQL)
+ORDER BY owner, name, line;
+
+-- Agregar delimitador final
+SELECT '/' || CHR(10) FROM dual;
+
+SPOOL OFF
+
+-- =====================================================
+-- TRIGGERS (ALL_SOURCE + delimitador / automático)
+-- =====================================================
+PROMPT Extrayendo TRIGGERS...
+SPOOL extracted/triggers.sql
+
+-- Agregar delimitador / entre objetos
+SELECT
+    CASE
+        -- Detectar cambio de trigger: agregar / antes del nuevo objeto
+        WHEN LAG(name) OVER (ORDER BY owner, name, line) IS NOT NULL
+             AND LAG(name) OVER (ORDER BY owner, name, line) != name THEN
+            '/' || CHR(10) || text
+        -- Primera línea del archivo o líneas normales
+        ELSE
+            text
+    END AS text
+FROM all_source
+WHERE type = 'TRIGGER'
+  AND owner IN ('LATINO_OWNER')
+ORDER BY owner, name, line;
+
+-- Agregar delimitador final
+SELECT '/' || CHR(10) FROM dual;
+
+SPOOL OFF
+
+-- =====================================================
+-- JAVA SOURCE (ALL_SOURCE directo - solo código)
+-- =====================================================
+PROMPT Extrayendo JAVA SOURCE...
+SPOOL extracted/java_sources.sql
+
+SELECT text
+FROM all_source
+WHERE type = 'JAVA SOURCE'
+  AND owner IN ('LATINO_PLSQL')
+ORDER BY owner, name, line;
+
+SPOOL OFF
+
+-- =====================================================
+-- TABLAS, CONSTRAINTS, SEQUENCES, etc.
+-- (Usar DBMS_METADATA - funcionan bien sin partición)
+-- =====================================================
+SET SERVEROUTPUT ON SIZE UNLIMITED
+
+-- Configurar DBMS_METADATA
 BEGIN
     DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'SQLTERMINATOR', TRUE);
     DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'PRETTY', TRUE);
@@ -30,221 +329,29 @@ BEGIN
 END;
 /
 
+-- A partir de aquí, copiar el resto del script original extract_all_objects.sql
+-- Desde la línea 248 (TABLES) hasta el final (línea 893)
+-- Las siguientes secciones NO necesitan cambios porque funcionan bien con DBMS_METADATA:
+--   - TABLES
+--   - PRIMARY KEYS
+--   - FOREIGN KEYS
+--   - CHECK CONSTRAINTS
+--   - SEQUENCES
+--   - TYPES
+--   - VIEWS
+--   - MATERIALIZED VIEWS
+--   - DIRECTORIES
+--   - JOBS
+--   - INVENTORY
+
+-- [COPIAR AQUI LINEAS 248-893 del script original]
+
+PROMPT
 PROMPT =====================================================
-PROMPT Iniciando extracción de objetos Oracle
-PROMPT Modificar WHERE owner IN (...) según tus schemas
-PROMPT =====================================================
-
--- =====================================================
--- FUNCIONES
--- =====================================================
-PROMPT Extrayendo FUNCTIONS...
-SPOOL extracted/functions.sql
-
-SELECT '-- ============================================' || CHR(10) ||
-       '-- Schema: ' || o.owner || CHR(10) ||
-       '-- Objeto: ' || o.object_name || CHR(10) ||
-       '-- Tipo: FUNCTION' || CHR(10) ||
-       '-- Ultima modificacion: ' || TO_CHAR(o.last_ddl_time, 'YYYY-MM-DD HH24:MI:SS') || CHR(10) ||
-       '-- Lineas de codigo: ' || NVL(s.line, 0) || CHR(10) ||
-       '-- ============================================' || CHR(10) ||
-       DBMS_METADATA.GET_DDL('FUNCTION', o.object_name, o.owner) || CHR(10) || CHR(10)
-FROM all_objects o
-LEFT JOIN (
-    SELECT name, owner, MAX(line) as line
-    FROM all_source
-    WHERE type = 'FUNCTION'
-    GROUP BY name, owner
-) s ON o.object_name = s.name AND o.owner = s.owner
-WHERE o.object_type = 'FUNCTION'
-  AND o.owner IN ('LATINO_PLSQL')
-ORDER BY o.owner, o.object_name;
-
-SPOOL OFF
-
--- =====================================================
--- PROCEDIMIENTOS
--- =====================================================
-PROMPT Extrayendo PROCEDURES...
-SPOOL extracted/procedures.sql
-
-SELECT '-- ============================================' || CHR(10) ||
-       '-- Schema: ' || o.owner || CHR(10) ||
-       '-- Objeto: ' || o.object_name || CHR(10) ||
-       '-- Tipo: PROCEDURE' || CHR(10) ||
-       '-- Ultima modificacion: ' || TO_CHAR(o.last_ddl_time, 'YYYY-MM-DD HH24:MI:SS') || CHR(10) ||
-       '-- Lineas de codigo: ' || NVL(s.line, 0) || CHR(10) ||
-       '-- ============================================' || CHR(10) ||
-       DBMS_METADATA.GET_DDL('PROCEDURE', o.object_name, o.owner) || CHR(10) || CHR(10)
-FROM all_objects o
-LEFT JOIN (
-    SELECT name, owner, MAX(line) as line
-    FROM all_source
-    WHERE type = 'PROCEDURE'
-    GROUP BY name, owner
-) s ON o.object_name = s.name AND o.owner = s.owner
-WHERE o.object_type = 'PROCEDURE'
-  AND o.owner IN ('LATINO_PLSQL')
-ORDER BY o.owner, o.object_name;
-
-SPOOL OFF
-
--- =====================================================
--- PACKAGES SPEC
--- =====================================================
-PROMPT Extrayendo PACKAGE SPECS (solo especificacion)...
-SPOOL extracted/packages_spec.sql
-
--- Usar bloque PL/SQL para control preciso
-DECLARE
-    v_ddl CLOB;
-    v_lines NUMBER;
-BEGIN
-    -- Configurar para extraer SOLO el spec (no body)
-    DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'BODY', FALSE);
-
-    FOR rec IN (
-        SELECT o.object_name, o.owner, o.last_ddl_time
-        FROM all_objects o
-        WHERE o.object_type = 'PACKAGE'
-          AND o.owner IN ('LATINO_PLSQL')
-        ORDER BY o.owner, o.object_name
-    ) LOOP
-        BEGIN
-            -- Obtener número de líneas del SPEC
-            SELECT MAX(line) INTO v_lines
-            FROM all_source
-            WHERE type = 'PACKAGE'
-              AND name = rec.object_name
-              AND owner = rec.owner;
-
-            -- Obtener DDL del PACKAGE SPEC solamente
-            v_ddl := DBMS_METADATA.GET_DDL('PACKAGE_SPEC', rec.object_name, rec.owner);
-
-            -- Imprimir
-            DBMS_OUTPUT.PUT_LINE('-- ============================================');
-            DBMS_OUTPUT.PUT_LINE('-- Schema: ' || rec.owner);
-            DBMS_OUTPUT.PUT_LINE('-- Objeto: ' || rec.object_name);
-            DBMS_OUTPUT.PUT_LINE('-- Tipo: PACKAGE SPEC');
-            DBMS_OUTPUT.PUT_LINE('-- Ultima modificacion: ' || TO_CHAR(rec.last_ddl_time, 'YYYY-MM-DD HH24:MI:SS'));
-            DBMS_OUTPUT.PUT_LINE('-- Lineas de codigo (SPEC): ' || NVL(v_lines, 0));
-            DBMS_OUTPUT.PUT_LINE('-- ============================================');
-
-            -- Imprimir CLOB en chunks para evitar ORA-06502
-            DECLARE
-                v_offset INTEGER := 1;
-                v_chunk_size CONSTANT INTEGER := 32767;
-                v_length INTEGER;
-            BEGIN
-                v_length := DBMS_LOB.GETLENGTH(v_ddl);
-                WHILE v_offset <= v_length LOOP
-                    DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_ddl, v_chunk_size, v_offset));
-                    v_offset := v_offset + v_chunk_size;
-                END LOOP;
-            END;
-
-            DBMS_OUTPUT.PUT_LINE('');
-
-        EXCEPTION
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('-- ERROR extrayendo SPEC de ' || rec.owner || '.' || rec.object_name || ': ' || SQLERRM);
-                DBMS_OUTPUT.PUT_LINE('');
-        END;
-    END LOOP;
-END;
-/
-
-SPOOL OFF
-
--- =====================================================
--- PACKAGES (BODY)
--- =====================================================
-PROMPT Extrayendo PACKAGE BODIES...
-SPOOL extracted/packages_body.sql
-
--- Usar bloque PL/SQL para manejar errores cuando no existe BODY
-DECLARE
-    v_ddl CLOB;
-    v_lines NUMBER;
-BEGIN
-    FOR rec IN (
-        SELECT o.object_name, o.owner, o.last_ddl_time
-        FROM all_objects o
-        WHERE o.object_type = 'PACKAGE BODY'
-          AND o.owner IN ('LATINO_PLSQL')
-        ORDER BY o.owner, o.object_name
-    ) LOOP
-        BEGIN
-            -- Obtener número de líneas
-            SELECT MAX(line) INTO v_lines
-            FROM all_source
-            WHERE type = 'PACKAGE BODY'
-              AND name = rec.object_name
-              AND owner = rec.owner;
-
-            -- Obtener DDL
-            v_ddl := DBMS_METADATA.GET_DDL('PACKAGE_BODY', rec.object_name, rec.owner);
-
-            -- Imprimir
-            DBMS_OUTPUT.PUT_LINE('-- ============================================');
-            DBMS_OUTPUT.PUT_LINE('-- Schema: ' || rec.owner);
-            DBMS_OUTPUT.PUT_LINE('-- Objeto: ' || rec.object_name);
-            DBMS_OUTPUT.PUT_LINE('-- Tipo: PACKAGE BODY');
-            DBMS_OUTPUT.PUT_LINE('-- Ultima modificacion: ' || TO_CHAR(rec.last_ddl_time, 'YYYY-MM-DD HH24:MI:SS'));
-            DBMS_OUTPUT.PUT_LINE('-- Lineas de codigo (BODY): ' || NVL(v_lines, 0));
-            DBMS_OUTPUT.PUT_LINE('-- ============================================');
-
-            -- Imprimir CLOB en chunks para evitar ORA-06502
-            DECLARE
-                v_offset INTEGER := 1;
-                v_chunk_size CONSTANT INTEGER := 32767;
-                v_length INTEGER;
-            BEGIN
-                v_length := DBMS_LOB.GETLENGTH(v_ddl);
-                WHILE v_offset <= v_length LOOP
-                    DBMS_OUTPUT.PUT_LINE(DBMS_LOB.SUBSTR(v_ddl, v_chunk_size, v_offset));
-                    v_offset := v_offset + v_chunk_size;
-                END LOOP;
-            END;
-
-            DBMS_OUTPUT.PUT_LINE('');
-
-        EXCEPTION
-            WHEN OTHERS THEN
-                DBMS_OUTPUT.PUT_LINE('-- ERROR extrayendo BODY de ' || rec.owner || '.' || rec.object_name || ': ' || SQLERRM);
-                DBMS_OUTPUT.PUT_LINE('');
-        END;
-    END LOOP;
-END;
-/
-
-SPOOL OFF
-
--- =====================================================
--- TRIGGERS (CORREGIDO)
--- =====================================================
-PROMPT Extrayendo TRIGGERS...
-SPOOL extracted/triggers.sql
-
-SELECT '-- ============================================' || CHR(10) ||
-       '-- Schema: ' || o.owner || CHR(10) ||
-       '-- Objeto: ' || o.object_name || CHR(10) ||
-       '-- Tipo: TRIGGER' || CHR(10) ||
-       '-- Tabla: ' || t.table_owner || '.' || t.table_name || CHR(10) ||
-       '-- Trigger Type: ' || t.trigger_type || CHR(10) ||
-       '-- Triggering Event: ' || t.triggering_event || CHR(10) ||
-       '-- Ultima modificacion: ' || TO_CHAR(o.last_ddl_time, 'YYYY-MM-DD HH24:MI:SS') || CHR(10) ||
-       '-- ============================================' || CHR(10) ||
-       DBMS_METADATA.GET_DDL('TRIGGER', o.object_name, o.owner) || CHR(10) || CHR(10)
-FROM all_objects o
-INNER JOIN all_triggers t ON o.object_name = t.trigger_name AND o.owner = t.owner
-WHERE o.object_type = 'TRIGGER'
-  AND o.owner IN ('LATINO_OWNER')
-ORDER BY o.owner, t.table_name, o.object_name;
-
-SPOOL OFF
-
--- =====================================================
+PROMPT Extraccion completada (v2)
+PROMPT
+PROMPT CODIGO FUENTE (ALL_SOURCE - SIN particion):
+PROMPT   - functions.sql
 -- TABLES (DDL) - ESTRUCTURA + CONSTRAINTS SEPARADOS
 -- =====================================================
 PROMPT =====================================================
@@ -754,6 +861,9 @@ FROM all_objects WHERE object_type = 'PACKAGE BODY' AND owner IN ('LATINO_PLSQL'
 SELECT '| TRIGGER | ' || COUNT(*) || ' | extracted/triggers.sql |' || CHR(10)
 FROM all_objects WHERE object_type = 'TRIGGER' AND owner IN ('LATINO_OWNER');
 
+SELECT '| JAVA SOURCE | ' || COUNT(*) || ' | extracted/java_sources.sql |' || CHR(10)
+FROM all_objects WHERE object_type = 'JAVA SOURCE' AND owner IN ('LATINO_PLSQL');
+
 SELECT '| TABLE | ' || COUNT(*) || ' | extracted/tables.sql |' || CHR(10)
 FROM all_objects WHERE object_type = 'TABLE' AND object_name NOT LIKE 'BIN$%' AND owner IN ('LATINO_OWNER');
 
@@ -873,11 +983,13 @@ PROMPT =====================================================
 PROMPT Extracción completada exitosamente
 PROMPT
 PROMPT Archivos generados en el directorio extracted/:
+PROMPT   - metadata.json          (Info compilación: schema, objeto, tipo, fecha, líneas)
 PROMPT   - functions.sql
 PROMPT   - procedures.sql
 PROMPT   - packages_spec.sql     (SOLO especificación, sin body)
-PROMPT   - packages_body.sql
+PROMPT   - packages_body.sql     (excluye ORA_EXCEL)
 PROMPT   - triggers.sql
+PROMPT   - java_sources.sql      (3 objetos Java - migrar a PL/pgSQL o Python)
 PROMPT   - tables.sql
 PROMPT   - primary_keys.sql
 PROMPT   - foreign_keys.sql
