@@ -278,11 +278,6 @@ if object_type == "PACKAGE_BODY":
     "public_cursors": [
       {"name": "Gc_Cursor", "parameters": ["p_id"], "query": "SELECT ...",
        "usage": "Obtiene datos X", "migration_strategy": "function_returning_setof"}
-    ],
-    "private_variables": [
-      {"name": "Lv_Internal", "type": "VARCHAR2(100)", "default_value": null,
-       "usage": "Variable interna del package", "scope": "package_private",
-       "migration_strategy": "schema_variable"}
     ]
   },
 
@@ -535,7 +530,6 @@ ESC.PROCEDIMIENTO_INICIO(...)                            -- ✅ External
        "usage": "Tasa global de impuesto", "migration_strategy": "session_variable",
        "migration_note": "SET my_app.tax_rate = 0.12"}
     ],
-    "public_constants": [],
     "public_types": [
       {"name": "T_Record", "definition": "TYPE ... IS RECORD", "type_category": "RECORD",
        "complexity": "SIMPLE", "migration_strategy": "composite_type",
@@ -545,12 +539,6 @@ ESC.PROCEDIMIENTO_INICIO(...)                            -- ✅ External
       {"name": "Gc_Cursor", "parameters": ["p_id"], "query": "SELECT ...",
        "usage": "Obtiene datos X", "migration_strategy": "function_returning_setof",
        "migration_note": "CREATE FUNCTION ... RETURNS SETOF"}
-    ],
-    "private_variables": [
-      {"name": "Lv_Cache", "type": "VARCHAR2(200)", "default_value": null,
-       "usage": "Cache interno del package, no accesible externamente",
-       "scope": "package_private", "migration_strategy": "schema_variable",
-       "migration_note": "Declarar como variable en schema PostgreSQL"}
     ]
   }
 }
@@ -723,16 +711,15 @@ Este ejemplo muestra la diferencia clave entre Schema A (PACKAGE_BODY) y Schema 
   "package_spec_context": {
     "spec_exists": true,
     "spec_line_range": [1911, 2230],
-    "public_variables": [],
-    "public_constants": [],
     "public_types": [
       {"name": "typ_resultados", "type_category": "RECORD", "complexity": "SIMPLE"},
       {"name": "typ_tab_resultados", "type_category": "TABLE_OF", "complexity": "COMPLEX"},
       {"name": "typ_det_orden", "type_category": "RECORD", "complexity": "COMPLEX"},
       {"name": "typ_tab_det_orden", "type_category": "TABLE_OF", "complexity": "COMPLEX"}
     ],
-    "public_cursors": [],
-    "private_variables": []
+    "public_variables": [],
+    "public_constants": [],
+    "public_cursors": []
   },
 
   "classification": {

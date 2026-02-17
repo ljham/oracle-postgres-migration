@@ -7,6 +7,30 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ---
 
+## [v2.23] - 2026-02-17 - plsql-analyzer v4.26: Agregar private_variables a Schema A
+
+### Added - agents/plsql-analyzer.md (v4.25 → v4.26)
+
+**Decisión:** Agregar campo explícito `private_variables` dentro de `package_spec_context` en Schema A.
+
+**Motivación:** El agente extraía variables privadas del BODY (sección declarativa) pero no tenía un campo
+designado en el schema donde incluirlas. `package_spec_context` pasa a tener 6 sub-campos:
+- public_variables, public_constants, public_types, public_cursors (existentes)
+- **private_variables** (nuevo)
+
+**Cambios en 3 ubicaciones:**
+1. **Schema A** (`<json_schema>`): Agregado `private_variables[]` con campos name, type, default_value, usage, scope, migration_strategy
+2. **`<spec_context_instructions>`**: Agregado `private_variables[]` en la estructura JSON esperada
+3. **`<package_body_vs_procedure_distinction>`**: Ejemplo obj_9984 actualizado con `private_variables: []`
+
+**Campos de private_variables:** name, type, default_value, usage, scope ("package_private"), migration_strategy, migration_note
+
+**Nota:** Sub-campo de `package_spec_context`, Schema A sigue siendo 9 campos top-level.
+
+**Líneas:** 876 → 889 (+13 líneas)
+
+---
+
 ## [v2.22] - 2026-02-17 - plsql-analyzer v4.25: Fix package.json prohibition post-testing
 
 ### Fixed - agents/plsql-analyzer.md (v4.24 → v4.25)
