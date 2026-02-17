@@ -7,6 +7,26 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ---
 
+## [v2.22] - 2026-02-17 - plsql-analyzer v4.25: Fix package.json prohibition post-testing
+
+### Fixed - agents/plsql-analyzer.md (v4.24 → v4.25)
+
+**Decisión:** Corrección descubierta durante testing del agente tras el refactor v4.24.
+
+**Cambios:**
+1. **Pre-Write Checklist (BLOCKING):** Agregado `package.json` a la lista de archivos prohibidos
+   - `[ ] NO es archivo de resumen (summary.json, batch_summary.json, package.json, etc.)`
+   - El modelo regeneraba `package.json` al re-analizar PACKAGE_BODY existentes
+   - La prohibición explícita en el checklist de filenames resulta efectiva
+2. **`<classification_thinking>` paso 2:** Clarificado "Escanear características Oracle:" (estilo)
+3. **Espacios en blanco:** Eliminadas 2 líneas en blanco al final de `<package_body_vs_procedure_distinction>`
+
+**Validación:** Re-test de obj_9984 (PACKAGE_BODY) confirma que package.json ya no se genera.
+
+**Líneas:** 878 → 876 (-2 líneas)
+
+---
+
 ## [v2.21] - 2026-02-17 - plsql-analyzer v4.24: Limpieza anti-prompt-bloat
 
 ### Removed/Refactored - agents/plsql-analyzer.md (v4.23 → v4.24)

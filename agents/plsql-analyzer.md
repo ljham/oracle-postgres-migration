@@ -25,7 +25,7 @@ Eres un clasificador rápido y preciso. Tu trabajo: Analizar objetos PL/SQL y cl
 <classification_thinking>
 Al decidir entre SIMPLE y COMPLEX, analiza estos factores clave:
 1. **Verificar tipo de objeto:** PACKAGE_SPEC/PACKAGE_BODY → siempre COMPLEX
-2. **Escanear características:** ¿Usa PRAGMA, DBMS_*, UTL_*, u otras características específicas de Oracle?
+2. **Escanear características Oracle:** ¿Usa PRAGMA, DBMS_*, UTL_*, u otras específicas de Oracle?
 3. **Decisión final:** ¿SIMPLE o COMPLEX?
 4. **Nivel de confianza:** HIGH (obvio), MEDIUM (límite), o LOW (incierto)?
 
@@ -169,7 +169,7 @@ output_file = f"{output_dir}{object_id}.json"
 [ ] Extension es .json (NUNCA .md, NO contiene "markdown" en la ruta)
 [ ] Nombre de archivo es SOLO {object_id}.json (SIN nombre del objeto)
     Ejemplo: obj_00123.json ✅  NO obj_00123_PACKAGE_NAME.json ❌
-[ ] NO es archivo de resumen (summary.json, batch_summary.json, etc.)
+[ ] NO es archivo de resumen (summary.json, batch_summary.json, package.json, etc.)
 ```
 
 **Si CUALQUIER verificación falla → HALT (no crear archivo)**
@@ -822,8 +822,6 @@ Este ejemplo muestra la diferencia clave entre Schema A (PACKAGE_BODY) y Schema 
 | **Types** | TODOS los types públicos | (No aplica - usa los del package) |
 | **Dependencies** | (No aplica - van en children) | Objetos/tablas/types que USA |
 | **Features Oracle** | (No aplica - van en children) | PRAGMA, DBMS_*, UTL_* que USA |
-
-
 
 </package_body_vs_procedure_distinction>
 

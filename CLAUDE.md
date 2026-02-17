@@ -309,20 +309,20 @@ claude
 
 | Agente | Versión | Líneas | Target | Características Clave |
 |--------|---------|--------|--------|----------------------|
-| **plsql-analyzer** | v4.24 | ~920 | 700 ⚠️ | Skip inteligente objetos existentes + captura completa types + variables privadas |
+| **plsql-analyzer** | v4.25 | 876 | 700 ⚠️ | Skip inteligente objetos existentes + captura completa types + variables privadas |
 | **plsql-converter** | v4.3.1 | 502 | 700 ✅ | Español + 12 XML tags, estrategias híbridas, feedback loop |
 | **plpgsql-validator** | v3.2.1 | 654 | 700 ✅ | Compilación por niveles, auto-corrección (máx 3), feedback loop |
 | **shadow-tester** | v1.0.1 | ~400 | 700 ✅ | Comparación Oracle vs PostgreSQL |
 
 **Excepción Documentada:**
-- **plsql-analyzer v4.24:** ~920 líneas (+31% sobre target de 700)
+- **plsql-analyzer v4.25:** 876 líneas (+25% sobre target de 700)
   - **Justificación:** Funcionalidad crítica para migración efectiva
     - Skip automático de objetos ya analizados (ahorro 20-30% tokens)
     - Captura TODOS los types públicos del package (no solo 1)
     - Extracción de variables/constantes PRIVADAS del BODY
     - Dos schemas adaptativos (PACKAGE_BODY vs PROCEDURE/FUNCTION)
     - Cinco ejemplos necesarios (casos de uso distintos)
-  - **Optimización histórica:** 1214 → 977 (-19.5%) → 1037 (v4.21) → 1024 (v4.23 -metrics) → 920 (v4.24 -redundancias -version_tags)
+  - **Optimización histórica:** 1214 → 977 (-19.5%) → 1037 (v4.21) → 1024 (v4.23 -metrics) → 878 (v4.24 -146) → 876 (v4.25 fix)
   - **Aprobación:** 2026-02-16/17 (cumple con espíritu de anti-prompt bloat, funcionalidad esencial + ahorro de tokens)
 
 ### Técnicas Aplicadas
@@ -337,7 +337,8 @@ claude
 7. **v4.18.1:** plsql-analyzer - Optimización conservadora (1214 → 977, -19.5%) sin pérdida de conocimiento
 8. **v4.22:** plsql-analyzer - Eliminación de package.json consolidado (redundante con Schema A)
 9. **v4.23:** plsql-analyzer - Eliminación de campo metrics de Schema B (12 → 11 campos)
-10. **v4.24:** plsql-analyzer - Limpieza anti-prompt-bloat: 5 redundancias + 11 version tags eliminados (~920 líneas)
+10. **v4.24:** plsql-analyzer - Limpieza anti-prompt-bloat: 5 redundancias + 11 version tags eliminados (878 líneas)
+11. **v4.25:** plsql-analyzer - Fix: package.json agregado a lista de archivos prohibidos (post-testing)
 
 ### Directrices para Futuras Modificaciones
 
@@ -592,7 +593,7 @@ Ver `archived/README.md` para detalles completos.
 
 **⚠️ CRÍTICO - Marco de Trabajo de Optimización:**
 - **LEER OBLIGATORIO:** Sección "🎯 Marco de Trabajo y Optimizaciones" en este archivo
-- **Versiones actuales:** plsql-analyzer v4.24, plsql-converter v4.3.1, plpgsql-validator v3.2.1
+- **Versiones actuales:** plsql-analyzer v4.25, plsql-converter v4.3.1, plpgsql-validator v3.2.1
 - **ANTES de modificar agentes:** Crear backup + seguir principios establecidos
 - **Política anti-prompt bloat:** Mantener agentes entre 500-700 líneas máximo
 - **XML tags obligatorios:** No eliminar estructura semántica
