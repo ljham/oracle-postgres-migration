@@ -1,7 +1,7 @@
-# Preservación de Lógica en Procedures y Functions
+# Preservacion de Logica en Procedures y Functions
 
 <purpose>
-Guía para mantener lógica de negocio intacta durante conversión Oracle→PostgreSQL.
+Guia para mantener logica de negocio intacta durante conversion Oracle→PostgreSQL.
 </purpose>
 
 ---
@@ -10,207 +10,59 @@ Guía para mantener lógica de negocio intacta durante conversión Oracle→Post
 
 ## Regla de Oro: **PRESERVAR > OPTIMIZAR**
 
-Durante la migración:
-1. **✅ SIEMPRE:** Preservar lógica exacta de negocio
-2. **❌ NUNCA:** "Mejorar" código sin aprobación explícita
-3. **✅ SIEMPRE:** Mantener estructura if/else/loop idéntica
-4. **✅ SIEMPRE:** Respetar orden de operaciones
-5. **❌ NUNCA:** Simplificar expresiones "redundantes" (pueden ser intencionales)
+El codigo Oracle puede tener logica de negocio no-obvia que parece redundante pero es critica.
 
-**Razón:** El código Oracle puede tener lógica de negocio no-obvia que parece redundante pero es crítica.
+**SIEMPRE preservar:**
+- Estructura de condicionales (IF/ELSIF/ELSE) — NO simplificar con CASE/COALESCE
+- Tipo de loop (FOR/WHILE/LOOP) — NO cambiar un tipo por otro
+- Orden exacto de statements — NO combinar o reordenar
+- Bloques EXCEPTION identicos — NO agregar/eliminar handlers
+- Inicializacion de variables (NULL, 0, '') — NO cambiar valores iniciales
+- Expresiones matematicas/logicas — NO simplificar (precision numerica critica)
+- Valores por defecto en parametros — NO modificar
+
+**NUNCA "mejorar" codigo** sin aprobacion explicita del usuario.
 
 </principles>
 
 ---
 
-<rules>
-
-## 1. Branches Condicionales (IF/ELSIF/ELSE)
-
-<rule name="preserve-exact-structure">
-**Mantener estructura EXACTA de condicionales**, incluso si parece redundante.
-</rule>
-
-```sql
--- Oracle (PRESERVAR COMO ESTÁ)
-IF condicion1 THEN
-  valor := 1;
-ELSIF condicion2 THEN
-  valor := 2;
-ELSE
-  valor := 0;
-END IF;
-
--- PostgreSQL (MISMA ESTRUCTURA)
-IF condicion1 THEN
-  valor := 1;
-ELSIF condicion2 THEN
-  valor := 2;
-ELSE
-  valor := 0;
-END IF;
-```
-
-**❌ NO simplificar** con CASE o COALESCE sin aprobación.
-
----
-
-## 2. Loops (FOR/WHILE/LOOP)
-
-<rule name="preserve-loop-type">
-Mantener el TIPO de loop original (FOR no debe volverse WHILE, etc.).
-</rule>
-
-```sql
--- Oracle: FOR loop numérico
-FOR i IN 1..10 LOOP ... END LOOP;
-
--- PostgreSQL: MISMO tipo de loop
-FOR i IN 1..10 LOOP ... END LOOP;
-```
-
----
-
-## 3. Orden de Operaciones
-
-<rule name="preserve-execution-order">
-Mantener orden EXACTO de statements, incluso si parece optimizable.
-</rule>
-
-```sql
--- Oracle (orden específico)
-v_total := 0;
-SELECT SUM(amount) INTO v_total FROM tabla1;
-v_final := v_total * 1.1;
-
--- PostgreSQL (MISMO orden)
-v_total := 0;
-SELECT SUM(amount) INTO v_total FROM tabla1;
-v_final := v_total * 1.1;
-```
-
-**❌ NO combinar** en single statement sin aprobación.
-
----
-
-## 4. Manejo de Excepciones
-
-<rule name="preserve-exception-blocks">
-Mantener bloques EXCEPTION idénticos. No agregar/eliminar handlers.
-</rule>
-
-```sql
--- Oracle
-BEGIN
-  ... lógica ...
-EXCEPTION
-  WHEN NO_DATA_FOUND THEN
-    resultado := 0;
-  WHEN OTHERS THEN
-    RAISE;
-END;
-
--- PostgreSQL (MISMA estructura)
-BEGIN
-  ... lógica ...
-EXCEPTION
-  WHEN NO_DATA_FOUND THEN
-    resultado := 0;
-  WHEN OTHERS THEN
-    RAISE;
-END;
-```
-
----
-
-## 5. Inicialización de Variables
-
-<rule name="preserve-initialization">
-Mantener valores iniciales EXACTOS (NULL, 0, '', etc.).
-</rule>
-
-```sql
--- Oracle
-v_count NUMBER := 0;    -- Inicializado explícitamente
-v_name VARCHAR2(100);   -- NULL implícito
-
--- PostgreSQL (MISMA inicialización)
-v_count NUMERIC := 0;   -- Inicializado explícitamente
-v_name VARCHAR(100);    -- NULL implícito
-```
-
----
-
-## 6. Expresiones Complejas
-
-<rule name="preserve-complex-expressions">
-NO simplificar expresiones matemáticas/lógicas complejas.
-</rule>
-
-```sql
--- Oracle (expresión compleja)
-v_result := (v_a + v_b) * v_c / (v_d - v_e + 1);
-
--- PostgreSQL (IDÉNTICA)
-v_result := (v_a + v_b) * v_c / (v_d - v_e + 1);
-```
-
-**Razón:** Orden de operaciones y precisión numérica pueden ser críticos.
-
----
-
-## 7. Valores Por Defecto en Parámetros
-
-<rule name="preserve-defaults">
-Mantener valores por defecto EXACTOS en parámetros.
-</rule>
-
-```sql
--- Oracle
-PROCEDURE proc(p_flag VARCHAR2 DEFAULT 'N', p_valor NUMBER DEFAULT 0)
-
--- PostgreSQL (MISMOS defaults)
-CREATE PROCEDURE proc(p_flag VARCHAR DEFAULT 'N', p_valor NUMERIC DEFAULT 0)
-```
-
-</rules>
-
----
-
 <warnings>
 
-## ⚠️ Trampas Comunes (EVITAR)
+## Trampas Comunes (EVITAR)
 
-### ❌ Trampa 1: "Simplificar" lógica redundante
+### Trampa 1: Simplificar logica "redundante"
 ```sql
--- Oracle (parece redundante pero puede tener razón de negocio)
+-- Oracle (parece ineficiente pero puede tener razon de negocio)
 IF v_status = 'A' THEN
   v_result := 'ACTIVE';
-ELSIF v_status = 'A' THEN  -- Parece duplicado
-  v_result := 'APPROVED';   -- Pero podría ejecutarse en ciertos casos
+ELSIF v_status = 'I' THEN
+  v_result := 'INACTIVE';
+ELSE
+  v_result := 'UNKNOWN';  -- Parece innecesario pero puede ser intencional
 END IF;
 ```
-**Acción:** Mantener EXACTO, documentar en comentario si tienes duda.
+**Accion:** Mantener EXACTO. NO simplificar con CASE o eliminar branches.
 
-### ❌ Trampa 2: Cambiar tipo de dato "equivalente"
+### Trampa 2: Cambiar tipo de dato "equivalente"
 ```sql
 -- Oracle: VARCHAR2(1) para flag
 v_flag VARCHAR2(1);
 
--- ❌ NO cambiar a: BOOLEAN
--- ✅ MANTENER: VARCHAR(1)
+-- NO cambiar a: BOOLEAN
+-- MANTENER: VARCHAR(1)
 ```
-**Razón:** Aplicación puede insertar 'S'/'N' directamente.
+**Razon:** Aplicacion puede insertar 'S'/'N' directamente.
 
-### ❌ Trampa 3: Optimizar queries
+### Trampa 3: Optimizar queries
 ```sql
 -- Oracle (query que parece ineficiente)
 SELECT * INTO rec FROM tabla WHERE id = p_id;
 
--- ❌ NO optimizar a: SELECT id, name INTO ... (solo campos necesarios)
--- ✅ MANTENER: SELECT * INTO ...
+-- NO optimizar a: SELECT id, name INTO ... (solo campos necesarios)
+-- MANTENER: SELECT * INTO ...
 ```
-**Razón:** Código posterior puede usar campos "no usados" en ciertos paths.
+**Razon:** Codigo posterior puede usar campos "no usados" en ciertos paths.
 
 </warnings>
 
@@ -218,24 +70,26 @@ SELECT * INTO rec FROM tabla WHERE id = p_id;
 
 <checklist>
 
-## ✅ Checklist de Preservación
+## Checklist de Preservacion
 
-Antes de completar conversión, verificar:
+Antes de completar conversion, verificar:
 
-- [ ] Estructura de condicionales idéntica (IF/ELSIF/ELSE)
+- [ ] Estructura de condicionales identica (IF/ELSIF/ELSE)
 - [ ] Tipo de loops preservado (FOR/WHILE/LOOP)
 - [ ] Orden de statements mantenido
-- [ ] Bloques EXCEPTION idénticos
-- [ ] Inicialización de variables exacta
+- [ ] Bloques EXCEPTION identicos
+- [ ] Inicializacion de variables exacta
 - [ ] Expresiones complejas sin simplificar
-- [ ] Valores por defecto en parámetros idénticos
+- [ ] Valores por defecto en parametros identicos
 - [ ] Tipos de datos equivalentes (no "mejorados")
 - [ ] No se agregaron/eliminaron statements
+- [ ] Comentarios preservados intactos
 
 </checklist>
 
 ---
 
-**Versión:** 2.0 (optimizada con XML tags)
-**Última Actualización:** 2026-02-03
-**Principio:** PRESERVAR lógica de negocio > OPTIMIZAR código
+**Version:** 3.0
+**Ultima Actualizacion:** 2026-02-17
+**Principio:** PRESERVAR logica de negocio > OPTIMIZAR codigo
+**Cambios v3.0:** Condensado de 241 a ~90 lineas. Eliminados 7 ejemplos de codigo identico Oracle=PostgreSQL. Corregido ejemplo Trampa 1 (logicamente imposible). Agregado "Comentarios preservados" a checklist.

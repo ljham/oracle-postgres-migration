@@ -13,26 +13,54 @@ Consultar cuando plsql-converter encuentre objetos COMPLEX con features específ
 
 <feature>
 Transacciones autónomas (commits independientes del caller). ~40 objetos estimados.
+Uso principal en Oracle: registrar logs/auditoría que persistan incluso si la tx principal hace ROLLBACK.
 </feature>
 
 <options>
 | Opción | Cuándo usar | Implementación |
 |--------|-------------|----------------|
-| **A: dblink** ✅ | Default | `dblink_exec()` con conexión separada |
-| **B: Staging + pg_cron** | Logging no crítico | Tabla temporal + job asíncrono |
-| **C: AWS Lambda** | Auditoría distribuida | Invocar Lambda para commit independiente |
+| **A: AWS Lambda** ✅ | **Default (SIEMPRE)** | `aws_lambda.invoke()` → Lambda → INSERT en tabla de log |
+
+**⚠️ PROHIBIDO usar dblink** — afecta gestión de sesiones y genera problemas sistémicos en Aurora.
 </options>
 
 <implementation strategy="A">
 ```sql
--- PostgreSQL (dblink)
-CREATE OR REPLACE PROCEDURE log_audit(p_action VARCHAR) LANGUAGE plpgsql AS $$
+-- Oracle (AUTONOMOUS_TRANSACTION)
+CREATE OR REPLACE PROCEDURE p_registrar_log(p_accion VARCHAR2, p_error VARCHAR2) IS
+  PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-  PERFORM dblink_exec('dbname=<db>',
-    format('INSERT INTO audit_log VALUES (CURRENT_TIMESTAMP, %L)', p_action));
+  INSERT INTO tabla_log (fecha, accion, error, usuario)
+  VALUES (SYSDATE, p_accion, p_error, USER);
+  COMMIT;
+END;
+
+-- PostgreSQL (aws_lambda — Aurora 17.4)
+CREATE OR REPLACE PROCEDURE p_registrar_log(p_accion VARCHAR, p_error VARCHAR) LANGUAGE plpgsql AS $$
+DECLARE
+  v_payload JSONB;
+  v_response TEXT;
+BEGIN
+  v_payload := jsonb_build_object(
+    'table_name', 'tabla_log',
+    'fecha', LOCALTIMESTAMP,
+    'accion', p_accion,
+    'error', p_error,
+    'usuario', CURRENT_USER
+  );
+  BEGIN
+    SELECT aws_lambda.invoke(
+      'arn:aws:lambda:<region>:<account>:function:autonomous_log_writer',
+      v_payload::TEXT
+    ) INTO v_response;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'Fallo invocación Lambda autonomous_log_writer: %', SQLERRM;
+  END;
 END; $$;
 ```
-**Requiere:** Extensión `dblink`
+**Requiere:** Extensión `aws_lambda` + Lambda function `autonomous_log_writer`
+**Comportamiento:** La Lambda inserta en la misma tabla de log. Si la tx principal hace ROLLBACK, el log persiste (mismo comportamiento que AUTONOMOUS_TRANSACTION en Oracle).
+**Si Lambda falla:** RAISE EXCEPTION notifica el error — NUNCA usar dblink como fallback.
 </implementation>
 
 ---
@@ -147,36 +175,7 @@ CREATE TYPE t_employee AS (id NUMERIC, name VARCHAR(100));
 
 ---
 
-## 6. BULK COLLECT y FORALL
-
-<feature>
-Operaciones masivas optimizadas. ~35 objetos estimados.
-</feature>
-
-<strategy>
-**Arrays + FOREACH**
-- BULK COLLECT → `ARRAY(SELECT ...)`
-- FORALL → `FOREACH ... IN ARRAY`
-</strategy>
-
-<implementation>
-```sql
--- Oracle
-BULK COLLECT INTO v_ids;
-FORALL i IN v_ids.FIRST..v_ids.LAST
-  UPDATE ...;
-
--- PostgreSQL
-v_ids := ARRAY(SELECT id FROM tabla);
-FOREACH v_id IN ARRAY v_ids LOOP
-  UPDATE ...;
-END LOOP;
-```
-</implementation>
-
----
-
-## 7. PIPELINED FUNCTIONS
+## 6. PIPELINED FUNCTIONS
 
 <feature>
 Funciones que retornan filas incrementalmente. ~10 objetos estimados.
@@ -204,7 +203,7 @@ END; $$;
 
 ---
 
-## 8. CONNECT BY (Queries Jerárquicas)
+## 7. CONNECT BY (Queries Jerárquicas)
 
 <feature>
 Consultas de relaciones padre-hijo. ~12 objetos estimados.
@@ -231,34 +230,68 @@ SELECT * FROM jerarquia;
 
 ---
 
-## 9. PACKAGES → SCHEMAS
+## 8. PACKAGES → SCHEMAS
 
 <feature>
 Conversión completa de packages. ~50 packages estimados.
 </feature>
 
 <strategy>
-**Schema + Functions/Procedures**
-- Package → Schema
-- Variables públicas → `set_config()` / `current_setting()`
-- Constantes públicas → Replicar en cada función
-- Tipos públicos → `CREATE TYPE schema.type`
+**Schema + Functions/Procedures + Getters/Setters para variables globales**
+- Package → Schema (`CREATE SCHEMA`)
+- Variables públicas (`Gv_*`, `Gi_*`) → Getter + Setter con `set_config()` / `current_setting()`
+- Variables privadas (`Lv_*`) → Getter + Setter con prefijo `_` (`_get_lv_*`/`_set_lv_*`)
+- Constantes públicas (`C_*`) → Replicar como literal en cada función que las usa
+- Tipos públicos → `CREATE TYPE schema.type AS (...)`
+- COMMIT/ROLLBACK dentro del package → **Preservar tal cual** (si tiene AUTONOMOUS_TRANSACTION → aws_lambda, ver sección #1)
 </strategy>
 
 <implementation>
 ```sql
--- Oracle
+-- Oracle package
 CREATE PACKAGE pkg IS
-  C_VAL CONSTANT NUMBER := 100;
+  Gv_Schema   VARCHAR2(50) := 'latino_owner';
+  Gi_MaxItems NUMBER := 100;
+  C_VERSION   CONSTANT NUMBER := 2;
+  TYPE t_row IS RECORD (id NUMBER, name VARCHAR2(100));
   PROCEDURE proc1;
 END pkg;
 
--- PostgreSQL
-CREATE SCHEMA pkg;
--- Constante: replicar en cada función que la usa
-CREATE PROCEDURE pkg.proc1() ...;
+-- PostgreSQL _create_schema.sql
+CREATE SCHEMA IF NOT EXISTS pkg;
+SET search_path TO latino_owner, pkg, public;
+
+-- Tipos públicos
+CREATE TYPE pkg.t_row AS (id NUMERIC, name VARCHAR(100));
+
+-- Variables globales: Getter + Setter
+CREATE OR REPLACE FUNCTION pkg.get_gv_schema() RETURNS VARCHAR LANGUAGE plpgsql AS $$
+BEGIN RETURN COALESCE(current_setting('pkg.gv_schema', TRUE), 'latino_owner'); END; $$;
+
+CREATE OR REPLACE FUNCTION pkg.set_gv_schema(p_value VARCHAR) RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN PERFORM set_config('pkg.gv_schema', p_value, FALSE); END; $$;
+
+CREATE OR REPLACE FUNCTION pkg.get_gi_maxitems() RETURNS NUMERIC LANGUAGE plpgsql AS $$
+BEGIN RETURN COALESCE(current_setting('pkg.gi_maxitems', TRUE)::NUMERIC, 100); END; $$;
+
+CREATE OR REPLACE FUNCTION pkg.set_gi_maxitems(p_value NUMERIC) RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN PERFORM set_config('pkg.gi_maxitems', p_value::TEXT, FALSE); END; $$;
+
+-- Procedimiento (constante replicada como literal)
+CREATE OR REPLACE PROCEDURE pkg.proc1() LANGUAGE plpgsql AS $$
+DECLARE
+  v_version NUMERIC := 2;  -- C_VERSION replicado como literal
+  v_schema  VARCHAR;
+BEGIN
+  v_schema := pkg.get_gv_schema();  -- Acceso a variable global via getter
+  -- ...
+END; $$;
 ```
-**Nota:** Variables globales requieren sesión-level config con `set_config()`.
+
+**Reglas de naming para getters/setters:**
+- `Gv_NombreVar` → `get_gv_nombrevars()` / `set_gv_nombrevar(p_value VARCHAR)`
+- `Gi_Contador` → `get_gi_contador()` / `set_gi_contador(p_value NUMERIC)`
+- Config key: `'{schema}.{variable_lowercase}'`
 </implementation>
 
 </strategies>
@@ -271,20 +304,19 @@ CREATE PROCEDURE pkg.proc1() ...;
 
 **¿Qué feature tiene el objeto COMPLEX?**
 
-1. **PRAGMA AUTONOMOUS_TRANSACTION** → Usar dblink
+1. **PRAGMA AUTONOMOUS_TRANSACTION** → Usar AWS Lambda (NUNCA dblink)
 2. **UTL_HTTP** → Usar AWS Lambda
 3. **UTL_FILE** → Usar AWS S3
 4. **DBMS_SQL** → Usar EXECUTE nativo
 5. **OBJECT TYPE** → Composite Type
-6. **BULK/FORALL** → Arrays + FOREACH
-7. **PIPELINED** → RETURNS SETOF
-8. **CONNECT BY** → WITH RECURSIVE
-9. **PACKAGE** → Schema + replicar constantes
+6. **PIPELINED** → RETURNS SETOF
+7. **CONNECT BY** → WITH RECURSIVE
+8. **PACKAGE** → Schema + getters/setters (públicos + privados)
 
 </decision-tree>
 
 ---
 
-**Versión:** 2.0 (optimizada con XML tags)
-**Última Actualización:** 2026-02-03
-**Cobertura:** 9 features complejas, ~237 objetos estimados
+**Versión:** 2.1
+**Última Actualización:** 2026-02-17
+**Cobertura:** 8 features complejas, ~202 objetos estimados (BULK/FORALL movido a syntax-mapping.md)
